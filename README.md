@@ -138,14 +138,93 @@ BEFORE（大多数方案）              AFTER（这个项目）
 ## 快速开始
 
 ```powershell
-git clone <本仓库地址> C:\plugins\qqbot
+git clone https://github.com/wushuizhibing/qqbot.git C:\plugins\qqbot
 ```
 
-然后照 [`qq-kit/README.md`](qq-kit/README.md#安装) 的步骤走。三个要点：
+然后照 [`qq-kit/README.md`](qq-kit/README.md#安装) 的步骤走。四个要点：
 
 1. **先跑一个 OneBot v11 协议端**，确认 `messageFormat` 是 `string`、`role` 是 `Universal`
 2. **第一次务必 `dryRun: true`** —— 它只打印打算回什么，不往群里发
 3. **加上安全预设**（`qq-kit/examples/preset-qq-chat.example.yml`），裁掉子代理的 shell/文件工具
+4. **知道它会花钱** —— 每轮两次模型调用。想省就把 `summarizeEvery` 调到 2，或者用便宜模型
+
+---
+
+## 可能会遇到的坑
+
+这些是实际踩过的，不是理论风险。按遇到概率排：
+
+### 装完发现工作区里一堆会话
+
+正常。每批消息 2 个一次性会话，跑完就归档。嫌多就把 `summarizeEvery` 调成 2、
+或者关掉 `impressions`。见上面那节。
+
+### 插件装了但没反应，日志也没有
+
+最常见的原因是 bundle 的 `cordis.patch.yml` 写成了普通条目而不是 `insert:` 形式。
+写错的时候 DSH 会**静默跳过整个 bundle**，不报错。
+
+```yaml
+# 错
+- id: qq-kit
+  name: dsh-qq-kit
+
+# 对
+- insert:
+    - id: qq-kit
+      name: dsh-qq-kit
+```
+
+### 报 `cannot get property "xxx" without inject`
+
+cordis 的 ctx 是 Proxy，读没在 `inject` 里声明过的属性会直接抛。
+如果你要写自己的插件接这套：可选依赖用 `ctx.get('xxx')`，别用 `ctx.xxx`。
+
+赋值的话反过来——得先 `ctx.provide('xxx')` 才能 `ctx.xxx = ...`。
+
+### 连不上协议端
+
+按这个顺序查：
+
+- accessToken 对不上（401）
+- 协议端没开 WS 服务，或者端口不对（ECONNREFUSED）
+- `messageFormat` 写成了 `array` —— **必须 `string`**，用 array 时事件可能推不出来
+- `role` 不是 `Universal` —— `Event` 只收不发、`Api` 只发不收
+
+`qq-kit-trace.log` 里能看到具体是哪类。
+
+### 它回得毫无个性 / 像个客服
+
+`personaPath` 没指到你的 `soul.md`，用的是内置中性人格。
+把 `soul.md` 放到 `persona/soul.md`（或显式配 `personaPath`）就会用上，改完不用重启。
+
+### 它认不出人 / 每次对话都像第一次见
+
+`memoryDir` 没配，或者配的目录是空的。它不会凭空记住谁，得有一份群记忆文件。
+
+### 情绪面板一片"平静"，几乎不动
+
+两种可能，都不是 bug：
+
+- 这段时间它真的没情绪，模型连着很多轮返回"无"
+- 分类词表不认识它用的那些说法，统一掉进了"平静"
+
+`mood-kit/README.md` 里有一节专门讲这个。
+
+### 一句话情绪挂很久不变
+
+旧版本有这个问题，现在沿用情绪最多续 2 轮、且不超过 10 分钟。
+如果你还遇到，看 `qq-kit-trace.log` 里的 `mood-parse` 探针，能看到模型每轮到底吐了什么。
+
+### 图片看不出是谁发的
+
+已经修了：正文里会有 `[图1]` `[图2]` 编号，提示词里逐张标注发送人和时间。
+如果版本旧，更新一下。
+
+### 重启后它忘了刚发生的事
+
+摘要和情绪都是落盘的，正常不会丢。如果丢了，检查 `DSH_HOME` 是否指向了别的目录
+——数据文件是按它定位的。
 
 ---
 
@@ -155,6 +234,7 @@ git clone <本仓库地址> C:\plugins\qqbot
 - **协议端依赖现实**：这类实现通常要挂一个完整客户端，客户端升级可能跟丢
 - **不是沙箱**：子代理是完整的 agent 会话，靠预设裁工具来限制能力
 - **发空间动态**：不在 OneBot 标准范围内，需要各协议端私有接口，风险高，未实现
+- **有成本**：每轮两次模型调用，按你用的模型计价。群活跃的话一天几块钱很正常
 
 ---
 
