@@ -117,7 +117,7 @@ function applyInner(ctx, bundleConfig) {
   // 用 cordis 的服务机制暴露给别的插件：
   //   provide 声明服务（owner 是本 fiber），赋值 = 注册实现；
   //   别的插件用 ctx.get('moodKit') 就能拿到（拿不到返回 undefined，不抛）。
-  // 注意：直接 `ctx.moodKit = api` 会抛 `cannot set property "moodKit" without provide`。
+  // ⚠️ 直接 `ctx.moodKit = api` 会抛 `cannot set property "moodKit" without provide`。
   try {
     if (typeof ctx.provide === 'function') {
       ctx.provide('moodKit');

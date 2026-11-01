@@ -326,6 +326,9 @@ function applyInner(ctx, bundleConfig) {
       get agents() {
         return agents;
       },
+      // 探针：记录思考子代理的原始输出和解析出的字段。
+      // 之前这里漏了，导致 thought 一直空着却看不到模型到底吐了什么。
+      trace: (event, data) => trace.write(event, data),
       // getter：人格热更新后，下一轮自动拿到新文本
       get persona() {
         return persona.text;
@@ -400,7 +403,7 @@ function applyInner(ctx, bundleConfig) {
         trace.write('summarize-gate', { key, since, every, needSummary, hasPrev: !!p?.text });
         if (!needSummary) {
           // 复用上一轮摘要，只累计批次数，不调模型（情绪跟着摘要一起复用）
-          // 注意：必须把累计值写回 map，否则 since 永远是 1，永远触发不了下一次总结
+          // ⚠️ 必须把累计值写回 map，否则 since 永远是 1，永远触发不了下一次总结
           turnsSinceSummary.set(key, since);
           return { ...p, covered: c.window?.length ?? p?.covered ?? 0 };
         }
@@ -664,7 +667,7 @@ function applyInner(ctx, bundleConfig) {
   // 为什么这么接：情绪逻辑（沿用上限、老化、放大、分类、人物星系）跟"QQ"没关系，
   // 别的聊天插件也想用同一套 —— 抽成 mood-kit 后，这里只剩"喂数据"这一步。
   //
-  // 注意：cordis 的 ctx 是 Proxy：没在 inject 里声明的属性直接读会抛
+  // ⚠️ cordis 的 ctx 是 Proxy：没在 inject 里声明的属性直接读会抛
   //    `cannot get property "moodKit" without inject`。
   //    可选依赖要用 ctx.get()（拿不到返回 undefined，不抛），不能用 ctx.xxx。
   let externalMood = null;

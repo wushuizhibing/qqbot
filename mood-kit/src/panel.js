@@ -98,7 +98,7 @@ export function renderPanelHtml() {
   html.bare .peoplelist, html.bare .extscroll, html.bare .tunegrid{background:transparent !important}
   /* 面板里的深色底元素（表格行、输入框轨道、进度条底）也一并透掉。
    *
-   * 注意：强度格子要排除在外：它靠 .on1~.on5 的背景色表示"点亮了几格"，
+   * ⚠️ 强度格子要排除在外：它靠 .on1~.on5 的背景色表示"点亮了几格"，
    * 连点亮的那几格一起透掉的话，强度条就只剩描边、看不出数值（踩过）。 */
   html.bare .bar, html.bare .track,
   html.bare .plrow .bar2, html.bare input[type=range],
@@ -877,7 +877,7 @@ function renderPeople(s) {
 // ── 外部贡献区块（qq-kit 等插件提供）────────────────────
 // 面板自己不知道有哪些聊天插件在跑，全靠它们注册的供给函数。
 //
-// 注意：这块里有用户正在操作的控件（滑块、"真发/只观察"按钮）。
+// ⚠️ 这块里有用户正在操作的控件（滑块、"真发/只观察"按钮）。
 // 如果每 2 秒无条件重写 innerHTML，用户刚拖滑块就被打回原位、"应用"点了像没反应。
 // 所以：区块结构只在"首次渲染"或"贡献方集合变了"时重建；
 // 之后只更新纯展示的文字（连接状态、会话数之类）。

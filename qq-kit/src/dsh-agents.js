@@ -390,11 +390,21 @@ export function createLlmThinker(deps, helpers) {
         '关系也只改态度松紧，不改你是谁：熟可以损，不熟别主动开嘲。',
         '不要一上来就阴阳、带刺、爱反问；除非对方先怼你，否则语气正常一点。',
         // ── 输出格式：三个字段都必填 ──
-        '只输出一个 JSON 对象：{"send":true|false,"text":"要说的话","thought":"心里那一下"}。',
-        '**三个字段都要写，thought 不许省**（漏了会记成空）。',
+        //
+        // 之前 thought 一直是空，排查下来是模型只写了 send/text 两个字段 ——
+        // 光说"不許省"压不住，得把模板摆出来、用完整示例、再重复一次。
+        '════ 输出格式（严格照着来）════',
+        '只输出一个 JSON 对象，**三个字段一个都不能少**：',
+        '{"send": true, "text": "要说的话", "thought": "心里那一下"}',
+        '',
+        '完整示例：',
+        '  输入：某人说「你们这样钓它不怕咬钩吗」',
+        '  输出：{"send": true, "text": "6", "thought": "这货又来钓我，懒得咬"}',
+        '',
+        '再强调一次：**thought 必须写**。它不会发进群，只给面板看，所以实话实说就行。',
+        '不想说话就 {"send": false, "text": "", "thought": "懒得接"}。',
         '**thought 和 text 得对得上**：thought 是"烦"，text 就不能是"好呀"这种没事人语气。',
-        '不想说话就 send=false（也可以只输出 NO_REPLY）；要说话就写得像群里随手打的一句。',
-        // thought 只落在面板上给人看（也用来复盘"她到底怎么想的"），不会发进群。
+        '',
         'thought 是这一下心里的念头：为什么这么接、为什么懒得展开、看完那条消息第一反应是什么。',
         '一句口语，20 字以内，不解释不总结。比如："这货又来钓我" / "没看懂，先看着" / "想怼回去但算了"。',
         '不要写成分析，也别写"我决定回复因为……"。',
@@ -434,6 +444,14 @@ export function createLlmThinker(deps, helpers) {
       const out = await runner.runOnce('思考子代理', prompt, 90000, images);
       if (!out) throw new Error('思考子代理没有返回内容');
       const parsed = parseJsonReply(out) ?? {};
+      // 探针：模型到底吐了什么。thought 一直是空的时候，靠这个判断是
+      // ① 模型没按格式输出，还是 ② 我们解析漏了字段。
+      deps.trace?.('think-parse', {
+        sessionKey: ctx.sessionKey,
+        raw: String(out).slice(0, 400),
+        keys: Object.keys(parsed),
+        thought: String(parsed.thought ?? '').slice(0, 60),
+      });
       if (parsed.send === false) return null;
       const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
       if (!text) return null;

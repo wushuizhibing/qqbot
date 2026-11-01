@@ -11,24 +11,13 @@
 聊天插件 C ─┘
 ```
 
-> 聊天机器人做情绪，难的不是"让它有点心情"，是**别让它永远挂着同一句**。
+> **一句话**：聊天机器人做情绪，难的不是"让它有点心情"，是**别让它永远挂着同一句**。
 > 这个插件把那些坑填了，对外只剩一个 `observe()`。
 
-## 为什么要单独做一层
-
-给机器人加情绪，第一反应总是"往 prompt 里塞一句心情"完事。跑几天就会发现：
-
-- 模型说"没情绪"，上一轮那句就一路沿下来，**一挂就是一整天**；
-- 强度永远停在 2——模型天生保守，写出来的东西听不出区别；
-- 隔了几小时它还在摆脸色，明明事儿早过去了；
-- 重启一次全忘光，星图从零开始；
-- 想做统计才发现，情绪是自由文本，**没法归类**。
-
-这些都是**状态机问题**，不是 prompt 问题。每个都单独打补丁的话，
-换一个聊天插件就得重来一遍。
-
-所以这层被拆了出来：情绪有强度、会老化、沿用有上限，状态会落盘，
-分类有固定维度，面板能画星图。**和协议无关**——哪天把 QQ 换成微信，这层不用重写。
+**它和其它情绪方案的区别**：大多数做法是把一句情绪塞进 prompt 就完事，于是会遇到
+"一直挂着同一句""强度永远 2""重启就忘"这类问题——每个都要单独打补丁。
+这个插件把这些当成**状态机问题**来解：情绪有强度、会老化、有沿用上限、会落盘，
+而且**和协议无关**——哪天你把 QQ 换成微信，这层不用重写。
 
 ## 它填了哪些坑
 
@@ -105,7 +94,7 @@ const now = moodKit?.current('group:123456');
 // { mood, intensity, label, since, carried }
 ```
 
-`observe()` 会自己处理"照抄上一轮""沿用上限""老化""落盘"，
+**关键点**：`observe()` 会自己处理"照抄上一轮""沿用上限""老化""落盘"，
 调用方只要诚实把模型输出丢进来，不用管状态。
 
 ## 完整 API
@@ -198,11 +187,11 @@ const now = moodKit?.current('group:123456');
 
 ```powershell
 # 1) clone 到任意目录
-git clone https://github.com/wushuizhibing/qqbot.git C:\plugins\qqbot
+git clone <本仓库地址> C:\plugins\mood-kit
 
 # 2) 链进 DSH 的 profile
 New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-mood-kit" `
-  -Target "C:\plugins\qqbot\mood-kit"
+  -Target "C:\plugins\mood-kit"
 ```
 
 3. profile 的 `package.json` 里加依赖和 bundle：
@@ -228,7 +217,7 @@ New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_m
 
 5. 重启 DSH，侧边栏出现「情绪」图标，或直接访问 `http://<web端口>/mood-kit`。
 
-> 注意：**bundle 的 `cordis.patch.yml` 必须用 `insert:` 形式**（仓库里已经是了）。
+> ⚠️ **bundle 的 `cordis.patch.yml` 必须用 `insert:` 形式**（仓库里已经是了）。
 > 写成普通 `- id:` 会让 DSH 静默跳过整个 bundle，表现为"插件没加载、日志也没有"。
 
 ## 为什么星图会骗人

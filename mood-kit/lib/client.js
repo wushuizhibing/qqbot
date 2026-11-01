@@ -64,7 +64,7 @@ window.__ModuleLoader__.load({
 
 			// 记住上次用的地址。
 			//
-			// 注意：一定要强制带上 transparent=1：早先版本存过不带参数的 /mood-kit，
+			// ⚠️ 一定要强制带上 transparent=1：早先版本存过不带参数的 /mood-kit，
 			// 直接复用会让面板变成不透明（踩过这个坑）。参数由这里统一加，不信任存量值。
 			React.useEffect(() => {
 				try {
@@ -128,7 +128,7 @@ window.__ModuleLoader__.load({
 				),
 			);
 			// ② 主区域。
-			//    main 插槽用的是 `key` 不是 `id`（AppFrame 那边
+			//    ⚠️ main 插槽用的是 `key` 不是 `id`（AppFrame 那边
 			//    renderSlot("main", {}, { entryKey: activePanelId })）。写成 id 的话
 			//    图标能点，但点了以后主区域找不到对应的 key，什么都不显示。
 			ctx.slots.inject("main", () =>

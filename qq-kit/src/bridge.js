@@ -347,6 +347,10 @@ export function validatePlan(plan) {
     segments: p.segments,
     mode,
     quoteId: mode === 'quote' && typeof p.quoteId === 'string' ? p.quoteId : undefined,
+    // 心里那一下：只给面板看，不进群。
+    // 必须在这里显式带出来 —— 这个函数是白名单式重建，没列出来的字段会被抹掉。
+    // 之前就漏了它：思考子代理明明给了，走到这儿变空，面板上永远看不到。
+    thought: typeof p.thought === 'string' ? p.thought.slice(0, 80) : '',
   };
 }
 

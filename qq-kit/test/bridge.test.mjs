@@ -226,3 +226,35 @@ test('renderMessages：图片要全局编号，能对上"哪张图配哪句话"'
   assert.match(out, /哈哈\[图3\]/);
   assert.ok(!out.includes('[图片]'), '不该退回无编号的 [图片]');
 });
+
+test('validatePlan：thought 要保留（它是白名单重建，漏了就会被抹掉）', () => {
+  const plan = {
+    chatKind: 'group',
+    chatId: '1',
+    segments: [{ type: 'text', text: '嗯' }],
+    mode: 'reply',
+    thought: '这货又来钓我，懒得咬',
+  };
+  const v = validatePlan(plan);
+  assert.ok(v, '计划要有效');
+  assert.equal(v.thought, '这货又来钓我，懒得咬', 'thought 不能被丢掉');
+});
+
+test('validatePlan：没给 thought 时是空串，不会变成 undefined', () => {
+  const v = validatePlan({
+    chatKind: 'group',
+    chatId: '1',
+    segments: [{ type: 'text', text: '嗯' }],
+  });
+  assert.equal(v.thought, '', '统一成空串，面板好判断');
+});
+
+test('validatePlan：thought 超长要截断', () => {
+  const v = validatePlan({
+    chatKind: 'group',
+    chatId: '1',
+    segments: [{ type: 'text', text: '嗯' }],
+    thought: 'x'.repeat(200),
+  });
+  assert.ok(v.thought.length <= 80, `实际 ${v.thought.length}`);
+});
