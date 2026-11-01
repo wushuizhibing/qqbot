@@ -1,0 +1,22 @@
+﻿node_modules/
+*.log
+qq-kit-summaries.json
+
+# 本地数据（千万别提交）
+qq-kit-summaries.json
+qq-kit-moods.json
+mood-kit-history.json
+qq-kit-live.json
+*.log
+*.bak
+*.bak-*
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

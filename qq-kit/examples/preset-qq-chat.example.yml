@@ -1,0 +1,82 @@
+# qq-kit-chat：纯聊天用 Agent 预设（示例）
+#
+# 用法：复制进 `$DSH_HOME/profiles/<你的profile>/cordis.patch.yml`，
+# 然后在 qq-kit 的 `agentOptions.agentPreset` 填 `qq-kit-chat`。
+#
+# 为什么需要它：QQ 子代理跑的是完整 agent 会话，默认带全部工具。
+# 群里有人诱导它执行命令、读文件，那就危险了。这个预设把工具面裁到只剩聊天+联网。
+#
+# 注意：name 必须是 DSH 里真实存在的插件名，写错会被静默跳过。
+
+- insert:
+    - id: preset-qq-kit-chat
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: qq-kit-chat
+        name: QQ Kit 聊天
+        description: 只聊天与联网；shell / 文件 / 任务 / 技能 / 提问卡 / 插件管理全部裁掉。
+        order: 51
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                你是在 QQ 群里聊天的人，不是助手。说人话、短句、像朋友闲聊。
+                直接输出要说的话本身；不想说话就输出 NO_REPLY。
+                不复述对方的话，不用客服腔，不用列表和标题。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+
+          # shell 两个平台都裁掉：聊天不需要，也防住被诱导执行命令
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: true
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: true
+
+          # 文件 / 搜索 / 任务 / 技能 / 卡片 / 插件管理
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            disabled: true
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            disabled: true
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+            disabled: true
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+            disabled: true
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+            disabled: true
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+            disabled: true
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+            disabled: true
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            disabled: true
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+            disabled: true
+          - id: tool-plugin-manager
+            name: '@deepseek-ai/dsh-plugin-manager/tools'
+            disabled: true
+          - id: tool-plugin-market
+            name: '@deepseek-ai/dsh-plugin-market/tools'
+            disabled: true
+
+          # 联网保留：查资料要用
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000

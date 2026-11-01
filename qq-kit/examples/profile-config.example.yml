@@ -1,0 +1,81 @@
+# dsh-qq-kit 配置示例
+#
+# 用法：把下面 `qq-kit` 那段复制进 `$DSH_HOME/profiles/<你的profile>/cordis.patch.yml`，
+# 重启 DSH。改完配置不用重新编译，插件每次加载都会重读。
+#
+# 前提：必须有一个 OneBot v11 协议端在跑（本项目不附带、不分发协议端）。
+# 详见 README 的「安装」。
+
+- id: qq-kit
+  name: dsh-qq-kit
+  config:
+    # ── 协议端 ───────────────────────────────────────────────
+    # mock    = 不连任何外部服务，只用来跑通链路
+    # onebot  = OneBot v11 over WebSocket（内置通用实现）
+    adapter: onebot
+    adapterOptions:
+      url: ws://127.0.0.1:3001/
+      accessToken: 换成你协议端 WS 服务里配的 accessToken
+      # 必须是 string：用 array 时部分协议端推不出事件（实测）
+      messageFormat: string
+
+    # ── 子代理 ───────────────────────────────────────────────
+    # 用 DSH 自己的 sessionController 起一次性会话，跑完归档
+    useDshAgents: true
+    agentOptions:
+      # 强烈建议配合一个"纯聊天"预设，禁止 shell/文件/任务类工具
+      # 这样群里怎么诱导都执行不了命令
+      agentPreset: qq-kit-chat
+      # 只作用于 QQ 线的一次性会话，不影响网页端默认模型
+      model:
+        provider: deepseek-account
+        model: deepseek-flash
+        reasoningEffort: off
+
+    # ── 安全 / 行为 ──────────────────────────────────────────
+    # true = 只打印"本来会发什么"，不真的发到群里。第一次接入先用 true 观察。
+    dryRun: true
+
+    # 机器人自己的 QQ 号：用来认出「@我」（@全体成员也算紧急）
+    selfId: ''
+    atUrgent: true
+
+    # 别人的号被 @ 时，硬发一句提醒（不走模型）。不需要就整个删掉。
+    # notifyOnMention:
+    #   ids: ['123456789']
+    #   text: '有人点你'
+    #   at: ['123456789']
+
+    # ── 识图 ─────────────────────────────────────────────────
+    # 收到图片消息时立刻下载，作为多模态输入交给子代理（模型直接看图，不走文字描述）
+    # 关掉写 vision: false
+    vision:
+      maxImages: 3          # 一批最多看几张（取最近的）
+      maxBytes: 4194304     # 单图上限 4MB，超了跳过
+
+    # ── 人格与记忆 ───────────────────────────────────────────
+    # soul.md 路径；file 不存在会退回内置的精简人格
+    personaPath: ''
+    # core = 关键几节（推荐，省 token）；full = 整篇
+    personaMode: core
+    # 群档案目录：里面放 <群号>.md；留空则不读
+    memoryDir: ''
+    # 认人表（known-users.json 那种结构）；留空则不读
+    knownUsersPath: ''
+    # 摘要持久化文件；留空 = $DSH_HOME/qq-kit-summaries.json
+    summaryFile: ''
+    # 每几轮真跑一次总结（其余复用上一轮摘要）
+    summarizeEvery: 3
+
+    # ── 消息节奏 ─────────────────────────────────────────────
+    merge:
+      windowMs: 800        # 攒多久触发一次思考
+      maxMessages: 20      # 一批最多几条（超了立刻触发）
+      perMinute: 1         # 每群每分钟最多主动触发几次；被 @ 不受限
+    coldSilenceMs: 30000   # 隔这么久再来消息，立刻触发
+
+    # ── 路由 ─────────────────────────────────────────────────
+    # 只有配了路由的群/人会被处理；其余只进窗口不回复
+    routes:
+      - chatKind: group
+        chatId: '123456789'

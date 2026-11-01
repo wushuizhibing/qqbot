@@ -1,0 +1,4 @@
+node_modules/
+*.log
+mood-kit-history.json
+.git/

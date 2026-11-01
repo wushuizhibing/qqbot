@@ -1,0 +1,41 @@
+{
+  "name": "dsh-qq-kit",
+  "version": "0.3.0",
+  "description": "把 QQ 机器人接进 DeepSeek Harness：会记人、会挑时候说话、有情绪有两段式思考。协议端只是翻译器，随时可换。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "adapters",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "examples"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "qq",
+    "onebot",
+    "snowluma"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "dsh-mood-kit",
+  "version": "0.2.0",
+  "description": "情绪与关系记忆：给聊天机器人一套不会卡死的情绪状态机，外加星图面板和人物关系图。与协议无关，任何聊天插件都能接。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./src/emotion.js": "./src/emotion.js",
+    "./src/mood-stats.js": "./src/mood-stats.js"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-client-plugin",
+    "deepseek-harness",
+    "mood",
+    "emotion",
+    "persona",
+    "radar",
+    "panel"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

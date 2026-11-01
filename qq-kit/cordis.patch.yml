@@ -1,0 +1,9 @@
+# dsh-qq-kit 的 bundle patch。
+#
+# 注意：这个文件**故意只插入行、不写 config**。
+#   - 配置全部放在 profile 的 cordis.patch.yml 里（按 id 覆盖），避免两边打架；
+#   - 早先这里和 profile 里各写了一次 `- id: qq-kit`，DSH 组合时报重复 entry 后
+#     静默跳过整个 bundle，表现就是"插件没加载、日志也没有"。
+- insert:
+    - id: qq-kit
+      name: dsh-qq-kit
