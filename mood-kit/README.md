@@ -1,5 +1,7 @@
 # dsh-mood-kit
 
+![version](https://img.shields.io/badge/version-0.2.0-a78bfa?style=flat-square) ![license](https://img.shields.io/badge/license-MIT-4ade80?style=flat-square)
+
 情绪与关系记忆插件，**与聊天协议无关**。
 
 别的聊天插件（QQ / 微信 / Discord / 自己的玩具协议）负责产生情绪，

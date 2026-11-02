@@ -1,5 +1,7 @@
 # dsh-qq-kit
 
+![version](https://img.shields.io/badge/version-0.3.0-38bdf8?style=flat-square) ![license](https://img.shields.io/badge/license-MIT-4ade80?style=flat-square)
+
 把 QQ 接进 [DeepSeek Harness](https://github.com/deepseek-ai)，**会话、人格、记忆、决策全归 DSH**，
 QQ 协议端只当翻译器，随时可换。
 

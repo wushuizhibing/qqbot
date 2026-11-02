@@ -1,14 +1,25 @@
 # qq-kit & mood-kit
 
+![qq-kit](https://img.shields.io/badge/qq--kit-v0.3.0-38bdf8?style=flat-square)
+![mood-kit](https://img.shields.io/badge/mood--kit-v0.2.0-a78bfa?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-4ade80?style=flat-square)
+
 把 QQ 机器人接进 [DeepSeek Harness](https://github.com/deepseek-ai) 的两个 DSH 插件。
 
 ```
-qq-kit     QQ 适配层：会话、人格、记忆、决策全归 DSH，协议端只当翻译器
-mood-kit   情绪与关系记忆：不卡死的情绪状态机 + 星图面板 + 人物关系图
+qq-kit     v0.3.0   QQ 适配层：会话、人格、记忆、决策全归 DSH，协议端只当翻译器
+mood-kit   v0.2.0   情绪与关系记忆：不卡死的情绪状态机 + 星图面板 + 人物关系图
 ```
 
 两个可以单独装，也可以一起装。装在一起时 mood-kit 会自动接管 qq-kit 的情绪，
 效果是**它带着心情说话，你能在面板上看到它此刻什么心情**。
+
+**当前版本：qq-kit `0.3.0` · mood-kit `0.2.0`**
+
+| 插件 | 版本 | 说明 |
+|---|---|---|
+| `dsh-qq-kit` | **0.3.0** | 会话、人格、记忆、两段式思考、面板 |
+| `dsh-mood-kit` | **0.2.0** | 情绪状态机、星图、人物关系、面板 |
 
 ---
 
