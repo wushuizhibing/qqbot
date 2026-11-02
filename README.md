@@ -266,6 +266,66 @@ cordis 的 ctx 是 Proxy，读没在 `inject` 里声明过的属性会直接抛�
 
 ---
 
+## 版本与发布
+
+当前版本：**qq-kit v0.3.0** · **mood-kit v0.2.0**
+
+版本号写在两个 `package.json` 里，改功能时一起改：
+
+```
+qq-kit/package.json    "version": "0.3.0"
+mood-kit/package.json  "version": "0.2.0"
+```
+
+### 发一个新版本
+
+```powershell
+# 1. 改功能
+# 2. 改对应的 package.json 里的 version（比如 0.3.0 → 0.3.1）
+# 3. 跑测试
+cd qq-kit;   node --test "test/**/*.test.mjs"
+cd mood-kit; node --test "test/**/*.test.mjs"
+
+# 4. 提交
+git add -A
+git commit -m "修复 xxx"
+
+# 5. 打标签（说明写清楚这次改了什么）
+git tag -a v0.3.1 -m "v0.3.1 — 修复 xxx"
+
+# 6. 推代码 + 标签
+git push origin main
+git push origin v0.3.1
+
+git push gitee main
+git push gitee v0.3.1
+```
+
+**别忘推标签**——只推 `main` 的话，Releases 页面不会出现新版本。
+
+### 版本号怎么定
+
+| 变化 | 版本 | 例子 |
+|---|---|---|
+| 加功能 | 次版本 +1 | 0.3.0 → 0.4.0 |
+| 只修 bug | 修订号 +1 | 0.3.0 → 0.3.1 |
+| 不兼容的改动 | 主版本 +1 | 0.3.0 → 1.0.0 |
+
+现在还是 0.x，说明配置格式可能变——升级前看一眼 changelog。
+
+### 两个仓库一起推
+
+本地配了两个远程，内容是同一份：
+
+```powershell
+git push origin main   # GitHub
+git push gitee main    # Gitee
+```
+
+只推一边的话，另一边就落后了。
+
+---
+
 ## 许可
 
 两个插件都是 MIT。
