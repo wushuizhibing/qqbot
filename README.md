@@ -137,7 +137,13 @@ BEFORE（大多数方案）              AFTER（这个项目）
 
 ## 快速开始
 
+两个仓库，内容一样，挑快的用：
+
 ```powershell
+# 国内（Gitee，直连快）
+git clone https://gitee.com/wushuizhibing/qqbot.git C:\plugins\qqbot
+
+# 海外（GitHub）
 git clone https://github.com/wushuizhibing/qqbot.git C:\plugins\qqbot
 ```
 
@@ -147,6 +153,17 @@ git clone https://github.com/wushuizhibing/qqbot.git C:\plugins\qqbot
 2. **第一次务必 `dryRun: true`** —— 它只打印打算回什么，不往群里发
 3. **加上安全预设**（`qq-kit/examples/preset-qq-chat.example.yml`），裁掉子代理的 shell/文件工具
 4. **知道它会花钱** —— 每轮两次模型调用。想省就把 `summarizeEvery` 调到 2，或者用便宜模型
+
+### 装依赖慢的话
+
+插件本身的源码没有 npm 依赖，但它跑在 DSH 里、要用 `ws` 这个包。
+国内直连 npm 官方经常超时，可以换镜像：
+
+```powershell
+npm config set registry https://registry.npmmirror.com
+```
+
+（只影响下载速度，跟插件功能无关。）
 
 ---
 

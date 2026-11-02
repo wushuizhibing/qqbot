@@ -187,7 +187,9 @@ const now = moodKit?.current('group:123456');
 
 ```powershell
 # 1) clone 到任意目录
-git clone <本仓库地址> C:\plugins\mood-kit
+# 国内用 Gitee，海外用 GitHub，内容一样
+git clone https://gitee.com/wushuizhibing/qqbot.git C:\plugins\qqbot
+# git clone https://github.com/wushuizhibing/qqbot.git C:\plugins\qqbot
 
 # 2) 链进 DSH 的 profile
 New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-mood-kit" `
