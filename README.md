@@ -109,9 +109,15 @@ BEFORE（大多数方案）              AFTER（这个项目）
 
 | 你想做什么 | 看这里 |
 |---|---|
+| 一步步装起来 | [`安装指南.md`](安装指南.md) |
+| 让 AI 帮你装 | [`AI安装说明.md`](AI安装说明.md) |
+| 了解项目全貌 | [`介绍.md`](介绍.md) |
 | 让 QQ 群里有个会聊天的机器人 | [`qq-kit/README.md`](qq-kit/README.md) |
 | 给它加上情绪和人物关系图 | [`mood-kit/README.md`](mood-kit/README.md) |
 | 自己写一个别的协议的适配 | [`qq-kit/docs/writing-adapters.md`](qq-kit/docs/writing-adapters.md) |
+
+> **AI 安装**：把 [`AI安装说明.md`](AI安装说明.md) 连同这句话丢给 DSH 或别的 AI agent——
+> 「按这个文档帮我装」——它会自己拉代码、建链接、改配置，只在需要你的 QQ 号和群号时停下来问你。
 
 ---
 
