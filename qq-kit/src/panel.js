@@ -24,8 +24,13 @@ import { collectPeople, relationSummary } from './people.js';
  * @typedef {{at: number, sessionKey: string, mood: string, polarity: number, intensity: number}} MoodPoint
  */
 
-/** 面板侧情绪历史上限（够看好几天的走势；超出自动丢最早的） */
-export const MOOD_HISTORY_MAX = 2000;
+/**
+ * 面板侧情绪历史上限。
+ *
+ * 真数据落在 mood-kit 那边（现已放宽到一年）。这里只是每次请求时截一下
+ * 传给前端的量 —— 调大点，免得"面板只看得到最近两千条"。
+ */
+export const MOOD_HISTORY_MAX = 20000;
 
 /** 情绪点在多快之内视为"同一个"，只更新时间、不新增点（避免一句话连写多条） */
 export const MERGE_WINDOW_MS = 5 * 60 * 1000;
@@ -108,18 +113,42 @@ export function collectState(deps) {
 
   const sessions = [...keys].map((key) => {
     const items = window.get(key);
-    const last = items[items.length - 1];
     const route = router.list().find((r) => {
       const k = r.chatKind === 'group' ? `group:${r.chatId}` : `private:${r.chatId}`;
       return k === key;
     });
+
+    // 跟 index.js 里 contribute 那份保持同一口径：
+    //   count      = history 里存了多少条（不被清空）
+    //   windowCount= 当前对话窗口还剩几条（每轮冷场会清）
+    //
+    // 这两份代码是重复的（一处喂 /qq-kit 面板，一处喂 mood-kit 面板），
+    // 改一处忘另一处就会出现"一边变了另一边没变"。
+    const hist = (history ?? []).filter((h) => h.key === key);
+    const lastWin = items[items.length - 1];
+    const lastHist = hist[hist.length - 1];
+
+    let lastText = '';
+    let lastSender = '';
+    let lastAt = null;
+    if (lastWin) {
+      lastText = toPlainText(lastWin.segments).slice(0, 120);
+      lastSender = lastWin.sender?.name ?? '';
+      lastAt = lastWin.time ?? null;
+    } else if (lastHist) {
+      lastText = String(lastHist.text ?? '').slice(0, 120);
+      lastSender = String(lastHist.sender ?? '');
+      lastAt = lastHist.time ?? null;
+    }
+
     return {
       key,
       routed: Boolean(route),
-      count: items.length,
-      lastText: last ? toPlainText(last.segments).slice(0, 120) : '',
-      lastSender: last?.sender?.name ?? '',
-      lastAt: last?.time ?? null,
+      count: hist.length,
+      windowCount: items.length,
+      lastText,
+      lastSender,
+      lastAt,
       summary: summaries.get(key)?.text ?? '',
       mood: summaries.get(key)?.mood ?? '',
     };
@@ -146,6 +175,9 @@ export function collectState(deps) {
     liveConfigFile: deps.liveConfigFile ?? '',
     sessions,
     recent: history.slice(-30).reverse(),
+    // 改了源码没重启时，面板顶部会顶一条黄条出来。
+    // （不提示的话，跑的是旧代码、界面却完全正常，特别容易误判。）
+    stale: Array.isArray(deps.stale) ? deps.stale : [],
     moodHistory: {
       points: moodHistory.slice(-MOOD_HISTORY_MAX),
       latest: moodHistory.length ? moodHistory[moodHistory.length - 1] : null,
@@ -228,6 +260,46 @@ export function renderPanelHtml() {
   /* ── 顶栏 HUD ── */
   header{display:flex;align-items:center;gap:15px;margin-bottom:24px;flex-wrap:wrap;
     padding-bottom:18px;border-bottom:1px solid var(--line);position:relative}
+  .diarylink{
+    margin-left:auto;padding:7px 16px;font-size:13px;color:var(--accent);text-decoration:none;
+    border:1px solid rgba(56,189,248,.35);background:rgba(56,189,248,.07);
+    clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,9px 100%,0 calc(100% - 9px));
+    transition:.15s}
+  .diarylink:hover{background:rgba(56,189,248,.16);border-color:var(--accent)}
+  /* 手动刷新：轮询卡住时的救命按钮 */
+  .refreshbtn{
+    margin-left:10px;padding:7px 14px;font-size:13px;font-family:inherit;cursor:pointer;
+    color:var(--fg2);border:1px solid var(--line);background:rgba(30,41,59,.5);
+    clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,9px 100%,0 calc(100% - 9px));
+    transition:.15s}
+  .refreshbtn:hover{color:var(--accent);border-color:rgba(56,189,248,.45);background:rgba(56,189,248,.1)}
+  .refreshbtn:active{transform:scale(.96)}
+  .refreshbtn.busy{color:#fbbf24;border-color:rgba(251,191,36,.5)}
+  /* 代码没重启的黄条 */
+  .stalebar{
+    display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+    margin-bottom:14px;padding:10px 14px;font-size:12.5px;line-height:1.6;
+    color:#fcd34d;border:1px solid rgba(251,191,36,.45);
+    background:rgba(120,53,15,.22);
+    clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+  .stalebar[hidden]{display:none}
+  .stalebar b{color:#fde68a}
+  .staleicon{
+    flex:none;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%;
+    font-size:11px;font-weight:700;color:#1a1205;background:#fbbf24}
+  .stalebar code{
+    font-family:Consolas,monospace;font-size:11.5px;color:#fbbf24;
+    background:rgba(251,191,36,.12);padding:1px 6px;border-radius:3px}
+  /* 「最近消息」里的想法 / 回复行 */
+  .rline{
+    margin-top:5px;font-size:11.5px;line-height:1.55;color:var(--fg3);
+    display:flex;gap:6px;align-items:baseline}
+  .rtag{
+    flex:none;font-size:10px;line-height:1;padding:2px 5px;border-radius:2px;
+    font-family:ui-sans-serif,system-ui,sans-serif}
+  .rtag.think{color:#c4b5fd;background:rgba(139,92,246,.16)}
+  .rtag.rep{color:#86efac;background:rgba(34,197,94,.14)}
+  .live{order:1}
   header::after{
     content:"";position:absolute;left:0;bottom:-1px;width:180px;height:2px;
     background:linear-gradient(90deg,var(--accent),transparent);
@@ -447,8 +519,16 @@ export function renderPanelHtml() {
       <h1>QQ Kit</h1>
       <div class="sub">协议端 → DSH 适配层 · 每 2 秒刷新</div>
     </div>
+    <a class="diarylink" href="/qq-kit/diary">群友日记 →</a>
+    <button type="button" class="refreshbtn" id="refreshBtn" title="立刻重新取一次数据（卡住的时候点一下）">刷新</button>
     <div class="live"><span class="dot" id="liveDot"></span><span id="liveText">连接中…</span></div>
   </header>
+
+  <div class="stalebar" id="staleBar" hidden>
+    <span class="staleicon">!</span>
+    <b>代码改了但没重启</b> —— 现在跑的还是启动时加载的旧版本，改的东西不会生效。
+    <code id="staleFiles"></code>
+  </div>
 
   <div class="row" id="cards"></div>
 
@@ -574,6 +654,30 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&l
 function barWidth(polarity) {
   const p = Math.max(-1, Math.min(1, Number(polarity) || 0));
   return Math.round((p + 1) / 2 * 100);
+}
+
+/**
+ * 代码没重启的提醒条。
+ *
+ * 服务端代码是 apply 时一次性加载的，改完文件不重启，跑的还是旧的 ——
+ * 但界面看起来完全正常，于是很容易把"没生效"误判成"有 bug"。
+ * 这一条就是专门治这个的。
+ */
+function renderStale(s) {
+  const bar = document.getElementById('staleBar');
+  const files = document.getElementById('staleFiles');
+  if (!bar || !files) return;
+  const list = Array.isArray(s.stale) ? s.stale : [];
+  if (!list.length) {
+    bar.hidden = true;
+    files.textContent = '';
+    return;
+  }
+  bar.hidden = false;
+  // 只列文件名，最多 4 个，多了加个 +N
+  const names = list.map((x) => x.file);
+  const shown = names.slice(0, 4).join(' · ');
+  files.textContent = names.length > 4 ? shown + ' +' + (names.length - 4) : shown;
 }
 
 function renderMood(s) {
@@ -1105,18 +1209,25 @@ function renderTune(s) {
     const pm = document.getElementById('tPerMin');
     const ev = document.getElementById('tEvery');
     const cd = document.getElementById('tCold');
+    // 每个 xxxV 都得单独判空。
+    // 踩过：pm 有、tPerMinV 没有时（模板改了 id、或者旧版页面缓存），
+    // .textContent 直接抛，整个 renderTune 中断 —— 而外面每 2 秒调一次，
+    // 于是面板看着没死，数字却一直停在老值上。
+    const pmV = document.getElementById('tPerMinV');
+    const evV = document.getElementById('tEveryV');
+    const cdV = document.getElementById('tColdV');
     if (pm && typeof merge.perMinute === 'number') {
       pm.value = String(merge.perMinute);
-      document.getElementById('tPerMinV').textContent = merge.perMinute === 0 ? '不限' : merge.perMinute + '/分';
+      if (pmV) pmV.textContent = merge.perMinute === 0 ? '不限' : merge.perMinute + '/分';
     }
     if (ev && typeof c.summarizeEvery === 'number') {
       ev.value = String(c.summarizeEvery);
-      document.getElementById('tEveryV').textContent = c.summarizeEvery === 1 ? '每轮' : '每 ' + c.summarizeEvery + ' 轮';
+      if (evV) evV.textContent = c.summarizeEvery === 1 ? '每轮' : '每 ' + c.summarizeEvery + ' 轮';
     }
     if (cd && typeof c.coldSilenceMs === 'number') {
       const sec = Math.round(c.coldSilenceMs / 1000);
       cd.value = String(sec);
-      document.getElementById('tColdV').textContent = sec + 's';
+      if (cdV) cdV.textContent = sec + 's';
     }
     tuneDry = Boolean(c.dryRun);
   }
@@ -1197,26 +1308,65 @@ document.querySelectorAll('.winbtn').forEach((btn) => {
 
 async function tick() {
   let s;
+  // 整个取数过程共用这一个超时。
+  //
+  // 之前只包住了 fetch 那一行，r.json() 那一步没有 —— 那一次要把 220KB 读完，
+  // 浏览器偶尔会卡在那儿不回来，于是 safeTick 的 finally 永远不执行，
+  // __tickBusy 一直是 true，整个轮询从此死掉。
+  // 表现就是"刷新到某一刻就再也不动了"，而且没有任何报错。
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15000);
   try {
     // 必须用绝对路径：面板挂在 /qq-kit 下，页面地址结尾没斜杠时，
     // './api/state' 会被解析成 /api/state（少了 /qq-kit 前缀），正好撞上 DSH 的受保护接口 -> 401
-    const r = await fetch('/qq-kit/api/state', { cache: 'no-store', credentials: 'same-origin' });
+    const r = await fetch('/qq-kit/api/state', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: ctl.signal,
+    });
     if (!r.ok) {
       // 网关没放行时 body 不是 JSON（比如 unauthorized），别让解析错误盖住真正的原因
       const body = await r.text().catch(() => '');
       throw new Error('HTTP ' + r.status + (body ? '：' + body.slice(0, 120) : ''));
     }
+    // 读 body 也带 signal，卡住会跟着 abort
     s = await r.json();
+    window.__qqkitLastOk = Date.now();
+    delete window.__qqkitTickError;
   } catch (e) {
-    document.getElementById('cards').innerHTML =
-      '<div class="card"><div class="k">取数据失败</div><div class="v bad">' + esc(e.message) + '</div></div>';
+    const msg = e && e.name === 'AbortError' ? '请求超时（15s）' : String(e && e.message ? e.message : e);
+    window.__qqkitTickError = msg;
+    const cards = document.getElementById('cards');
+    if (cards) {
+      cards.innerHTML =
+        '<div class="card"><div class="k">取数据失败</div><div class="v bad">' + esc(msg) + '</div></div>';
+    }
     return;
+  } finally {
+    clearTimeout(timer);
   }
 
-  renderMood(s);
-  renderStars(s);
-  renderPeople(s);
-  renderTune(s);
+  // 每块单独包一层 try。
+  //
+  // 以前这里是连着调的 —— 只要 renderMood 抛一次（比如某个字段形状不对），
+  // 后面的 renderStars/renderPeople/renderTune 全都不会跑，
+  // 而 setInterval 还在每 2 秒调一次，结果就是「面板看着还活着，数据停在几分钟前」。
+  // 这种失败最难查：没有红字、没有弹窗，就是数字不动。
+  for (const [name, fn] of [
+    ['renderStale', renderStale],
+    ['renderMood', renderMood],
+    ['renderStars', renderStars],
+    ['renderPeople', renderPeople],
+    ['renderTune', renderTune],
+  ]) {
+    try {
+      fn(s);
+    } catch (err) {
+      // 出错也要留下痕迹：控制台一行，面板角上挂个标记，别装作没事
+      console.error('[' + name + '] 渲染失败:', err);
+      window.__qqkitRenderError = name + ': ' + (err && err.message ? err.message : String(err));
+    }
+  }
 
   const conn = s.connection?.connected;
   // 顶部连接指示灯
@@ -1242,7 +1392,10 @@ async function tick() {
         const mood = (x.mood || '').slice(0, 60);
         return '<tr><td class="mono">' + esc(x.key) + '</td>' +
         '<td>' + (x.routed ? '<span class="tag on">已配</span>' : '<span class="tag off">无</span>') + '</td>' +
-        '<td>' + x.count + '</td>' +
+        // 「消息」= 今天收到多少条（不会被清空）
+        // 后面小字是当前窗口里还剩几条 —— 这两个以前混在一起，冷场一轮就显示 0，
+        // 看着像消息没收到。
+        '<td>' + x.count + (x.windowCount ? '<span class="k" style="margin-left:6px">窗口 ' + x.windowCount + '</span>' : '') + '</td>' +
         '<td>' + esc(x.lastSender) + (x.lastAt ? ' <span class="k">' + fmtTime(x.lastAt) + '</span>' : '') +
           '<div class="trunc">' + esc(x.lastText) + '</div></td>' +
         '<td>' + (mood ? '<span class="tag mood">' + esc(mood) + '</span>' : '<span class="k">—</span>') + '</td>' +
@@ -1252,16 +1405,141 @@ async function tick() {
 
   const recent = s.recent ?? [];
   document.getElementById('recent').innerHTML = recent.length
-    ? recent.map(m =>
-        '<tr><td class="mono">' + fmtTime(m.time) + '</td>' +
-        '<td class="mono">' + esc(m.key) + '</td>' +
-        '<td>' + esc(m.sender) + '</td>' +
-        '<td class="trunc' + '">' + esc(m.text) + '</td></tr>')
+    ? recent.map(m => {
+        // 「内容 / 她的想法 / 回的」三合一。
+        //
+        // 之前只渲染 m.text —— thought 和 reply 明明有值却没画出来，
+        // 等于把"她为什么这么回"这条最关键的线索丢了。
+        let cell = esc(m.text);
+        if (m.thought) {
+          cell += '<div class="rline"><span class="rtag think">想</span>' + esc(m.thought) + '</div>';
+        }
+        if (m.reply) {
+          cell += '<div class="rline"><span class="rtag rep">回</span>' + esc(m.reply) + '</div>';
+        }
+        return '<tr><td class="mono">' + fmtTime(m.time) + '</td>' +
+          '<td class="mono">' + esc(m.key) + '</td>' +
+          '<td>' + esc(m.sender) + '</td>' +
+          '<td class="trunc">' + cell + '</td></tr>';
+      }).join('')
     : '<tr><td colspan="4" class="empty">暂无消息</td></tr>';
 }
 
-tick();
-setInterval(tick, 2000);
+// 轮询。
+//
+// 三层保护，都是踩出来的：
+//   ① 上一次还没回来就跳过这一次 —— 否则请求排队堆积，2 秒一次越拉越长
+//   ② 外面包 catch —— tick 内部漏出来的异常不至于让 interval 默默挂掉
+//   ③ 看门狗 —— 就算 tick 因为某种还没想到的原因永远不返回，
+//      超过 30 秒也强行把 busy 放掉，让下一轮能重新开始。
+//      （踩过：r.json() 卡住 → finally 不执行 → 面板从此再不刷新，且无报错）
+let __tickBusy = false;
+let __tickBusySince = 0;
+const TICK_WATCHDOG_MS = 30000;
+
+function safeTick() {
+  if (__tickBusy) {
+    const stuck = Date.now() - __tickBusySince;
+    if (stuck < TICK_WATCHDOG_MS) {
+      // 跳过不代表没事：记下来，指示器会显示"等待中"
+      window.__qqkitSkipped = (window.__qqkitSkipped || 0) + 1;
+      return;
+    }
+    // 超时太久，认作卡死，强行放开
+    console.warn('[tick] 看门狗触发：上一轮已经卡了 ' + Math.round(stuck / 1000) + 's，强制重来');
+    window.__qqkitTickError = '上一轮卡了 ' + Math.round(stuck / 1000) + 's，已强制重来';
+    __tickBusy = false;
+  }
+  __tickBusy = true;
+  __tickBusySince = Date.now();
+  tick()
+    .catch((err) => {
+      console.error('[tick] 整体失败:', err);
+      window.__qqkitTickError = String(err && err.message ? err.message : err);
+    })
+    .finally(() => {
+      __tickBusy = false;
+      __tickBusySince = 0;
+    });
+}
+safeTick();
+setInterval(safeTick, 2000);
+
+// 手动刷新：强制放掉 busy 锁，立刻重来一次。
+// 轮询卡死的时候，等看门狗要 30 秒，点一下马上就能重来。
+const refreshBtn = document.getElementById('refreshBtn');
+if (refreshBtn) {
+  refreshBtn.addEventListener('click', () => {
+    __tickBusy = false;
+    __tickBusySince = 0;
+    delete window.__qqkitTickError;
+    delete window.__qqkitRenderError;
+    refreshBtn.classList.add('busy');
+    refreshBtn.textContent = '刷新中';
+    try {
+      tick()
+        .catch((err) => {
+          console.error('[手动刷新] 失败:', err);
+          window.__qqkitTickError = String(err && err.message ? err.message : err);
+        })
+        .finally(() => {
+          // 交替写英文/中文：避免模板里出现多余的成对引号干扰解析
+          refreshBtn.classList.remove('busy');
+          refreshBtn.textContent = '\u5237\u65b0';
+        });
+    } catch (err) {
+      refreshBtn.classList.remove('busy');
+      refreshBtn.textContent = '\u5237\u65b0';
+    }
+  });
+}
+
+// 右下角状态：最后一次成功刷新多久了、有没有跳过、有没有报错。
+//
+// 这一块是为了"数据不动"时能自己说话：群里真安静，和面板真卡住，
+// 以前看起来一模一样，只能靠猜。现在一眼能分开。
+setInterval(() => {
+  let box = document.getElementById('qqkitFresh');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'qqkitFresh';
+    box.style.cssText =
+      'position:fixed;right:10px;bottom:8px;font:11px ui-monospace,monospace;' +
+      'color:#64748b;background:rgba(10,14,20,.85);padding:3px 8px;border-radius:4px;' +
+      'z-index:9999;pointer-events:none;border:1px solid rgba(100,116,139,.25)';
+    document.body.appendChild(box);
+  }
+  const err = window.__qqkitRenderError || window.__qqkitTickError;
+  const last = window.__qqkitLastOk;
+  const ago = last ? Math.round((Date.now() - last) / 1000) : null;
+  const skipped = window.__qqkitSkipped || 0;
+
+  if (err) {
+    box.style.color = '#f87171';
+    box.style.borderColor = 'rgba(248,113,113,.5)';
+    box.textContent = '刷新出错 · ' + err;
+  } else if (__tickBusy) {
+    box.style.color = '#fbbf24';
+    box.style.borderColor = 'rgba(251,191,36,.4)';
+    box.textContent = '请求中… · ' + (ago === null ? '尚未成功' : ago + 's 前');
+  } else if (ago === null) {
+    box.style.color = '#94a3b8';
+    box.textContent = '还没成功刷新过';
+  } else if (ago > 30) {
+    box.style.color = '#f87171';
+    box.style.borderColor = 'rgba(248,113,113,.5)';
+    box.textContent = '卡住了 · 最后刷新 ' + ago + 's 前';
+  } else if (ago > 8) {
+    box.style.color = '#fbbf24';
+    box.style.borderColor = 'rgba(251,191,36,.4)';
+    box.textContent = '变慢 · ' + ago + 's 前';
+  } else {
+    box.style.color = '#64748b';
+    box.style.borderColor = 'rgba(100,116,139,.25)';
+    box.textContent = '已刷新 · ' + ago + 's 前' + (skipped ? '（跳过 ' + skipped + '）' : '');
+  }
+}, 1000);
+
 window.addEventListener('resize', () => {
   const el = document.getElementById('moodNow');
   if (el) drawChart((window.__lastMoodPoints || []));

@@ -258,3 +258,43 @@ test('validatePlan：thought 超长要截断', () => {
   });
   assert.ok(v.thought.length <= 80, `实际 ${v.thought.length}`);
 });
+
+// ── @ 谁 ─────────────────────────────────────
+//
+// 协议端给 @ 段时通常只带 id 不带 name，而 nameOf 只从"这批 + 更宽窗口"里建。
+// 之前查不到名字就只输出一个裸 `@`，模型看到「@ 什么默认？」根本不知道在问谁。
+
+const atMsg = (id, sid, name, segs) => ({ id, time: Date.now(), sender: { id: sid, name }, segments: segs });
+
+test('renderMessages：@ 人带上号，跟说话人格式一致', () => {
+  const out = renderMessages([
+    atMsg('1', '111', '老王', [{ type: 'text', text: '今天真累' }]),
+    atMsg('2', '222', '小李', [{ type: 'at', id: '111' }, { type: 'text', text: ' 你怎么看' }]),
+  ]);
+  assert.match(out, /@老王\(111\)/, '应该渲染成 @名字(号)');
+});
+
+test('renderMessages：查不到名字的 @ 也要带号，不能只剩一个 @', () => {
+  const out = renderMessages([atMsg('3', '333', '陌生人', [{ type: 'at', id: '999' }, { type: 'text', text: ' 在吗' }])]);
+  assert.match(out, /@999/, '查不到名字就至少给号');
+  assert.ok(!/\s@\s/.test(out), '不能出现光秃秃的 @');
+});
+
+test('renderMessages：@我 单独标出来', () => {
+  const out = renderMessages([atMsg('4', '222', '小李', [{ type: 'at', id: '100000001' }, { type: 'text', text: ' 在吗' }])], [], {
+    selfId: '100000001',
+  });
+  assert.match(out, /@我\(100000001\)/, '要能分出"这句是冲我来的"');
+});
+
+test('renderMessages：@全体成员 不被当成某个叫 all 的人', () => {
+  const out = renderMessages([atMsg('5', '222', '小李', [{ type: 'at', id: 'all' }, { type: 'text', text: ' 开会' }])], [], {
+    selfId: '100000001',
+  });
+  assert.match(out, /@全体成员/);
+});
+
+test('renderMessages：段里自带 name 时优先用它', () => {
+  const out = renderMessages([atMsg('6', '222', '小李', [{ type: 'at', id: '111', name: '老王' }, { type: 'text', text: ' 好' }])]);
+  assert.match(out, /@老王\(111\)/);
+});

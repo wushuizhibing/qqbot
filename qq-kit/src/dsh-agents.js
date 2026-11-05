@@ -270,7 +270,13 @@ export function createLlmSummarizer(deps, helpers) {
       const fresh = helpers.renderMessages(ctx.messages, ctx.window);
       const prompt = [
         '你是 QQ 群聊的上下文总结器。把下面这批新消息并入已有摘要。',
-        '要求：只输出一个 JSON 对象，形如 {"text":"...","facts":["..."],"mood":"...","intensity":0}；text 不超过 200 字，讲清人在聊什么、情绪、有没有在等回复；facts 只放稳定事实（称呼、约定、身份）。',
+        '要求：只输出一个 JSON 对象，形如 {"text":"...","topic":"...","facts":["..."],"mood":"...","intensity":0}；text 不超过 200 字，讲清人在聊什么、情绪、有没有在等回复；facts 只放稳定事实（称呼、约定、身份）。',
+        // ── 当前话题：单独一个字段 ──
+        //
+        // text 是"这段时间都发生了什么"，越滚越糊；topic 是"现在在聊什么"，
+        // 短、具体、随时替换。两者分开，接话时才知道该接哪个茬。
+        'topic 写**当前正在聊的那件事**，10 字以内，具体到能对上号（"红米手机推荐""周末开黑约时间"）。',
+        '如果这批消息没推进任何话题（纯刷图、纯附和），topic 就沿用上一轮的；实在没有就写空串。',
         // ── 情绪：从这批消息里重新判断，不看历史 ──
         'mood 写你自己（群友身份）当下的情绪：一句完整的话，20 字以内，主语是你自己。',
         '**只根据"这批新消息"判断情绪**，不要推测之前发生过什么。',
@@ -338,6 +344,11 @@ export function createLlmSummarizer(deps, helpers) {
       const since = mood ? (sameMood && Number.isFinite(previous?.since) ? previous.since : Date.now()) : 0;
       return {
         text: typeof parsed.text === 'string' ? parsed.text : String(out).slice(0, 200),
+        // 当前话题：没给就沿用上一轮的（纯刷图不该把话题冲掉）
+        topic:
+          typeof parsed.topic === 'string' && parsed.topic.trim()
+            ? parsed.topic.trim().slice(0, 20)
+            : String(previous?.topic ?? ''),
         facts: Array.isArray(parsed.facts) ? parsed.facts.map(String) : [...(previous?.facts ?? [])],
         covered: ctx.window.length,
         mood,
@@ -432,8 +443,26 @@ export function createLlmThinker(deps, helpers) {
               '看清是谁发的再决定怎么接；看不懂就当没看见，别猜。',
             ].join('\n')
           : '',
-        summary ? `上下文摘要：${summary.text}` : '',
-        '最新消息：',
+        // ── 三层上下文 ──
+        //
+        // 之前只有"摘要 + 最新消息"两段。摘要会越滚越糊，中间那些话的**原词**就丢了，
+        // 而接话往往靠的就是原词（"那个红米""刚才说的那个"）。
+        //
+        // 所以补中间一层：把窗口里**还没被这批消息覆盖的那部分原话**也放进去。
+        // 层与层不重复：摘要讲结论，原话给措辞，最新消息是要回的对象。
+        summary ? `【当前话题】${summary.topic || '（没有明确话题）'}` : '',
+        summary ? `【之前聊的】${summary.text}` : '',
+        (() => {
+          // 窗口里剔除本批消息后剩下的，就是"刚说过、模型没直接看到"的原话
+          const batchIds = new Set((ctx.messages ?? []).map((m) => String(m?.id ?? '')));
+          const earlier = (ctx.window ?? []).filter((m) => !batchIds.has(String(m?.id ?? '')));
+          if (earlier.length === 0) return '';
+          // 只留最后 N 条：再往前的信息摘要里已经有了
+          const keep = earlier.slice(-Number(deps.recentContextMax ?? 20));
+          const rendered = helpers.renderMessages(keep, ctx.window);
+          return rendered.trim() ? `【刚说过的话】\n${rendered}` : '';
+        })(),
+        '【要接的消息】',
         helpers.renderMessages(ctx.messages, ctx.window),
       ].filter(Boolean).join('\n');
       // 同 summarize：agents 可能是 getter，实时取

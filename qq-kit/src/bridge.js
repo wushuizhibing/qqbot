@@ -199,9 +199,11 @@ export function normalizeMood(raw) {
  *
  * @param {import('./message.js').Message[]} messages
  * @param {import('./message.js').Message[]} [context] 更宽的上下文窗口：引用可能在上一批里
+ * @param {{ selfId?: string }} [options] selfId 用来把「@我」单独标出来
  * @returns {string}
  */
-export function renderMessages(messages, context) {
+export function renderMessages(messages, context, options = {}) {
+  const selfId = String(options.selfId ?? '').trim();
   const list = messages ?? [];
   // 两个索引，都从"这批 + 更宽窗口"里建：
   //   byId  —— 引用段只给 id，用它还原本话
@@ -255,9 +257,29 @@ export function renderMessages(messages, context) {
             return `[图${imgNo}]`;
           }
           if (s.type !== 'at') return toPlainText([s]);
-          if (s.name) return `@${s.name}`;
-          const known = s.id ? nameOf.get(String(s.id)) : '';
-          return known ? `@${known}` : '@';
+          // @ 谁 —— 带上号，跟说话人格式一致（名字(号)）。
+          //
+          // 之前只在查得到名字时输出 @名字，查不到就只剩一个光秃秃的 `@`，
+          // 模型看到「@ 什么默认？」根本不知道被 @ 的是谁，容易答非所问。
+          // 而 nameOf 只从"这批 + 更宽窗口"里建，稍微久一点的人就查不到了。
+          //
+          // 协议端给 @ 段时通常只带 id 不带 name，所以查不到名字是常态。
+          const atName = s.name || (s.id ? nameOf.get(String(s.id)) : '') || '';
+          const atId = s.id ? String(s.id) : '';
+
+          // @全体成员：协议端用 id="all"（部分实现给 0 或 all）。这个要单独标出来，
+          // 不然会被当成某个叫 "all" 的群友。
+          if (atId === 'all' || atId === '0') return '@全体成员';
+
+          // @我：标成 @我(号)，模型才知道这句是冲它来的
+          if (selfId && atId === String(selfId)) {
+            return atName ? `@我(${atId})` : `@我(${atId})`;
+          }
+
+          if (atName && atId && atName !== atId) return `@${atName}(${atId})`;
+          if (atName) return `@${atName}`;
+          if (atId) return `@${atId}`;
+          return '@';
         })
         .join('')
         .replace(/\[回复\]/g, '');

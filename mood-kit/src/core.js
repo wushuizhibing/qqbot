@@ -72,7 +72,7 @@ export function createMoodState(options = {}) {
   const log = createMoodLog({
     file: options.file,
     max: options.max ?? MOOD_HISTORY_MAX,
-    keepDays: options.keepDays ?? 7,
+    keepDays: options.keepDays ?? 365,
     warn: options.warn,
   });
   /** @type {ReturnType<typeof makePoint>[]} */
@@ -194,12 +194,14 @@ export function createMoodState(options = {}) {
 
   /**
    * 记忆星系数据：从若干群的记忆文件里抽人。
-   * @param {{ memoryDir?: string, chatIds?: string[] }} [opts]
+   * @param {{ memoryDir?: string, chatIds?: string[], relationshipOf?: (m: string, id: string) => string }} [opts]
    */
   function people(opts = {}) {
     const list = collectPeople({
       memoryDir: opts.memoryDir ?? options.memoryDir,
       chatIds: opts.chatIds ?? [],
+      // 外部注册的判定器优先：让聊天插件当家，免得两边判定分叉
+      relationshipOf: opts.relationshipOf ?? options.relationshipOf,
     });
     return { nodes: list, summary: relationSummary(list) };
   }
@@ -213,7 +215,7 @@ export function createMoodState(options = {}) {
    */
   function points() {
     const now = Date.now();
-    const keep = options.keepDays ?? 7;
+    const keep = options.keepDays ?? 365;
     return freshPoints(history.slice(-MOOD_HISTORY_MAX), keep, now).map((p) => ({
       ...p,
       weight: displayWeight(p.at, now),
@@ -238,6 +240,13 @@ export function createMoodState(options = {}) {
     points,
     latest,
     save,
+    /**
+     * 历史累计条数（含已被上限裁掉的）。
+     *
+     * 面板上的「情绪点」原来用 points.length，一到上限就永远显示 2000，
+     * 看着像卡住了。换成这个才是真·累计。
+     */
+    total: () => log.total(),
     /** 底层历史数组（面板直接渲染用；改它后果自负） */
     get history() {
       return history;

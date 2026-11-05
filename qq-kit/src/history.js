@@ -33,7 +33,9 @@ function localDay(d = new Date()) {
 export function createHistoryLog(options = {}) {
   const dir = options.dir;
   const prefix = options.prefix ?? 'history';
-  const keepDays = Math.max(1, options.keepDays ?? 30);
+  // 历史日志默认留一年。原来 30 天，等于一个月前的聊天记录自动没了 ——
+  // 那样日记补不了、状态也没法比更长的基线。
+  const keepDays = Math.max(1, options.keepDays ?? 365);
   const maxBytesPerDay = options.maxBytesPerDay ?? 32 * 1024 * 1024;
   const warn = options.warn ?? (() => {});
 

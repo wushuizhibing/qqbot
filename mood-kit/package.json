@@ -1,6 +1,6 @@
 {
   "name": "dsh-mood-kit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "情绪与关系记忆：给聊天机器人一套不会卡死的情绪状态机，外加星图面板和人物关系图。与协议无关，任何聊天插件都能接。",
   "type": "module",
   "main": "index.js",

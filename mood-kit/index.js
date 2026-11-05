@@ -25,7 +25,7 @@ import { renderPanelHtml, collectPanelState } from './src/panel.js';
 export const name = 'mood-kit';
 export const inject = [];
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 
 /**
  * @param {any} ctx
@@ -60,8 +60,14 @@ function applyInner(ctx, bundleConfig) {
     // 群记忆目录（人物星系的数据源）；留空则不画人物
     memoryDir: '',
     // 历史上限与保留天数
-    maxPoints: 2000,
-    keepDays: 7,
+    //
+    // 2026-11-05 放宽：原来 2000 条 / 7 天，等于一周前的情绪点自动就丢了。
+    // 那样攒不住东西 —— 哪天想回头看"上个月什么样"，发现早没了。
+    // 现在留一年、两万个点（约 40MB），基本等于不丢。
+    //
+    // 情绪点本身很小（一轮一条，一天最多也就几百条），不用吝啬。
+    maxPoints: 20000,
+    keepDays: 365,
     ...(bundleConfig ?? {}),
   };
 
@@ -79,8 +85,8 @@ function applyInner(ctx, bundleConfig) {
   const state = createMoodState({
     file: dataFile,
     memoryDir: config.memoryDir,
-    max: Number(config.maxPoints) || 2000,
-    keepDays: Number(config.keepDays) || 7,
+    max: Number(config.maxPoints) || 20000,
+    keepDays: Number(config.keepDays) || 365,
     warn: (m) => log('warn', m),
   });
   log('info', `情绪中枢已启动，历史 ${state.points().length} 个点，落盘 ${dataFile}`);
@@ -102,6 +108,18 @@ function applyInner(ctx, bundleConfig) {
     people: state.people,
     points: state.points,
     latest: state.latest,
+    /**
+     * 注册"关系判定器"：聊天插件把自己的 relationshipOf 交过来，面板就用它。
+     *
+     * 为什么要有这个：判定逻辑原来两边各写一份，然后分叉了 ——
+     * qq-kit 补了防冒充的坑，面板这边还是老版本，把"爱出题让人写主人"
+     * 这种条目也判成主人。让聊天插件当唯一权威，就不会再对不上。
+     *
+     * @param {(memory: string, userId: string) => string} fn
+     */
+    setRelationshipJudge(fn) {
+      if (typeof fn === 'function') options.relationshipOf = fn;
+    },
     /** 面板供给：聊天插件把会话/消息/参数注册进来 */
     panel: {
       contribute: (id, fn) => panelHub.contribute(id, fn),

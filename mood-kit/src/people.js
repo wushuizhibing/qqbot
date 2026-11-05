@@ -55,6 +55,13 @@ function looksLikePersonName(name) {
  */
 export function collectPeople(options = {}) {
   const { memoryDir, warn } = options;
+  // 关系判定可以让外部插件接管。
+  //
+  // 为什么：这套判定原来在 qq-kit 和 mood-kit 各写了一份，然后分叉了 ——
+  // qq-kit 那边补了防冒充的坑，面板这边还是老版本，导致"爱出题让人写主人"
+  // 这种条目被判成主人。现在允许聊天插件注册自己的判定器，两边永远一致。
+  /** @type {(memory: string, userId: string) => string} */
+  const judge = typeof options.relationshipOf === 'function' ? options.relationshipOf : relationshipOf;
   /** @type {Array<{id:string,name:string,relation:string,weight:number,warmth:number,note:string,group:string}>} */
   const out = [];
 
@@ -119,7 +126,7 @@ export function collectPeople(options = {}) {
       // 没号时用名字当标识 —— 反正记忆本身就靠名字认人，图上也只需要一个唯一键。
       const id = ids[0] || openid || `name:${name.toLowerCase()}`;
 
-      const relation = relationshipOf(text, id);
+      const relation = judge(text, id);
 
       // 按"人"合并：同一个人只画一个节点，群归属记进 groups。
       // 两种合并都做：

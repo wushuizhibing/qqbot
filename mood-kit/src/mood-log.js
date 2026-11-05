@@ -19,9 +19,14 @@ export function createMoodLog(options = {}) {
   const warn = options.warn ?? (() => {});
   /** @type {Array<{at:number,sessionKey:string,mood:string,polarity:number,intensity:number}>} */
   let points = [];
+  // 历史累计条数（含已经被裁掉的）。
+  //
+  // 面板上「情绪点」原来显示 points.length，一到 2000 上限就永远不动 ——
+  // 看着像"卡住"，其实是"存满了、最早的被丢掉了"。
+  // 现在单独记一个只增不减的总数：裁掉多少就往上加多少。
+  let total = 0;
   let loaded = false;
   let dirty = false;
-
   /**
    * 丢掉太旧的（按时间），再丢掉超额的（按条数）。
    *
@@ -42,7 +47,18 @@ export function createMoodLog(options = {}) {
     if (!file) return;
     try {
       const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (Array.isArray(raw)) points = raw.filter((p) => p && typeof p === 'object');
+      // 兼容两种格式：
+      //   老格式 —— 直接一个数组
+      //   新格式 —— { total, points }，能记住被裁掉的量
+      if (Array.isArray(raw)) {
+        points = raw.filter((p) => p && typeof p === 'object');
+        total = points.length;
+      } else if (raw && Array.isArray(raw.points)) {
+        points = raw.points.filter((p) => p && typeof p === 'object');
+        const saved = Number(raw.total);
+        // total 至少不能比现有条数少
+        total = Number.isFinite(saved) && saved > points.length ? saved : points.length;
+      }
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') return;
       warn(`读取情绪历史失败（${file}）：${error instanceof Error ? error.message : String(error)}`);
@@ -55,7 +71,7 @@ export function createMoodLog(options = {}) {
     const tmp = `${file}.tmp`;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(tmp, JSON.stringify(points, null, 2), 'utf8');
+      fs.writeFileSync(tmp, JSON.stringify({ total, points }, null, 2), 'utf8');
       fs.renameSync(tmp, file);
     } catch (error) {
       warn(`写入情绪历史失败（${file}）：${error instanceof Error ? error.message : String(error)}`);
@@ -78,6 +94,10 @@ export function createMoodLog(options = {}) {
     push(point) {
       load();
       points.push(point);
+      // 累计计数在 push 里加，不放进 prune ——
+      // prune 只在"真删了东西"时才有意义，而每个新点本身就该算一次。
+      // （之前放在 prune 里，结果只有裁掉时才 +1，累计数落后一大截。）
+      total += 1;
       prune();
       dirty = true;
       // 每条都落盘：情绪点不多（一轮一个），不会成为 IO 负担
@@ -90,6 +110,11 @@ export function createMoodLog(options = {}) {
     size() {
       load();
       return points.length;
+    },
+    /** 历史累计条数（含已被裁掉的），面板「情绪点」用这个 */
+    total() {
+      load();
+      return Math.max(total, points.length);
     },
   };
 }

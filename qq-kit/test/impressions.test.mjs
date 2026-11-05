@@ -12,6 +12,7 @@ import {
   writeMemoryFile,
   pickPeopleToUpdate,
   IMPRESSION_MAX,
+  extractId,
 } from '../src/impressions.js';
 import {
   renderTranscript,
@@ -263,4 +264,36 @@ test('addPersonEntry：没有「群里的人」段就不乱加', async () => {
   const r = addPersonEntry(noSection, { name: '甲', id: '1' });
   assert.equal(r.added, false);
   assert.equal(r.memory, noSection);
+});
+
+// ── 号怎么取 ──────────────────────────────────
+test('extractId：完整 openid 优先，不能截里面的数字', () => {
+  // 真实事故：openid `2729BB896205BA354B077BB70DD7679A` 里的 896205
+  // 被当成 QQ 号，面板上多出一个查无此人的「群友戊」
+  const line = '- **群友戊**（`2729BB896205BA354B077BB70DD7679A`）：安静';
+  assert.equal(extractId(line), '2729BB896205BA354B077BB70DD7679A');
+});
+
+test('extractId：括号里的 QQ 号优先于 openid', () => {
+  assert.equal(extractId('- **老王（QQ 123456789）**：话多'), '123456789');
+  assert.equal(extractId('- **老李(100000004)**：学生'), '100000004');
+});
+
+test('extractId：负号要去掉', () => {
+  assert.equal(extractId('- **小满（QQ -1177714212）**：爱管事'), '1177714212');
+});
+
+test('extractId：没有号的返回空串', () => {
+  assert.equal(extractId('- **无名**：刚进群的'), '');
+});
+
+test('parsePeopleSection：openid 那种条目取到的是完整 openid', () => {
+  const mem = [
+    '## 群里的人',
+    '- **群友戊**（`2729BB896205BA354B077BB70DD7679A`）：安静。',
+    '',
+  ].join('\n');
+  const list = parsePeopleSection(mem);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, '2729BB896205BA354B077BB70DD7679A', '不能是 896205');
 });

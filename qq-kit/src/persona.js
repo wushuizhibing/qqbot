@@ -9,14 +9,40 @@
  */
 import fs from 'node:fs';
 
-/** 这些章节标题（前缀匹配）归到 core。 */
-const CORE_SECTIONS = [
-  '## 临场反应',
-  '## 一、你是谁',
-  '## 二、群聊说话铁律',
-  '## 十、AI 味黑名单',
-  '## 十一、回复示例',
+/**
+ * 这些章节归到 core。
+ *
+ * 用关键词而不是完整标题 —— 标题是会改的。
+ * 踩过的坑：原来写死成 ['## 临场反应', '## 一、你是谁', ...]，
+ * 后来 soul.md 重写时章节名一改（「二、群聊说话铁律」→「二、怎么说话」），
+ * 5 个里只匹配上 1 个，每轮只带过去「你是谁」那一小段，
+ * 骂人/说话/示例这些**关键约束全丢了**，而且没有任何报错 ——
+ * 表现是"人格突然变淡"，很难想到是标题改名引起的。
+ *
+ * 现在按标题里的关键词判断，命中任意一个就归 core。
+ */
+const CORE_HINTS = [
+  // 临场反应 / 最要紧的一条 / 骨头 / 姿态
+  ['临场', '最要紧', '骨头', '姿态'],
+  // 你是谁
+  ['你是谁', '身份'],
+  // 说话方式 / 说话铁律 / 怎么说话
+  ['说话'],
+  // 被冒犯 / 骂人 / 吵架
+  ['冒犯', '骂人', '吵架'],
+  // 什么时候开口
+  ['开口'],
+  // AI 味黑名单
+  ['AI 味', '黑名单'],
+  // 回复示例
+  ['示例'],
 ];
+
+/** 这一节的标题是否属于 core */
+function isCoreHeading(heading) {
+  const h = String(heading ?? '');
+  return CORE_HINTS.some((keys) => keys.some((k) => h.includes(k)));
+}
 
 /** 文件读不到时的兜底人格：只保留最关键的行为约束。 */
 export const FALLBACK_PERSONA = `你是一个群聊机器人，身份是群友，不是助手。
@@ -54,7 +80,7 @@ export function splitSections(text) {
  */
 export function extractCorePersona(text) {
   const sections = splitSections(text);
-  const picked = sections.filter((s) => CORE_SECTIONS.some((head) => s.heading.startsWith(head)));
+  const picked = sections.filter((s) => isCoreHeading(s.heading));
   if (picked.length === 0) return String(text ?? '').trim();
   return picked.map((s) => s.body.trim()).join('\n\n');
 }

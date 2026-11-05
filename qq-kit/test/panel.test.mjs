@@ -139,3 +139,57 @@ test('collectState：没有情绪历史也不崩', () => {
   assert.deepEqual(state.moodHistory.points, []);
   assert.equal(state.moodHistory.latest, null);
 });
+
+test('collectState：count 用 history 口径，不是窗口条数', () => {
+  // 真实事故：窗口每轮冷场会清空，count 拿 items.length 就显示 0，
+  // 但群里明明收到了 458 条 —— 看着像消息没进来。
+  const window = createContextWindow(10);
+  const router = createRouter([{ chatKind: 'group', chatId: '111' }]);
+  const summaries = new Map();
+
+  const m1 = msg('第一条', '小A', '111');
+  window.push('group:111', m1);
+  // 模拟窗口被清空（冷场一轮之后）
+  window.clear?.('group:111');
+
+  const history = [
+    { key: 'group:111', sender: '小A', text: '第一条', time: m1.time },
+    { key: 'group:111', sender: '小B', text: '第二条', time: m1.time + 1000 },
+    { key: 'group:111', sender: '小C', text: '第三条', time: m1.time + 2000 },
+  ];
+
+  const state = collectState({
+    adapter: { running: true, url: '' },
+    window,
+    router,
+    summaries,
+    history,
+    config: { adapter: 'onebot' },
+    version: '0.0.4',
+  });
+
+  const s = state.sessions.find((x) => x.key === 'group:111');
+  assert.equal(s.count, 3, 'count 应该是 history 的条数，不是窗口条数');
+  assert.equal(typeof s.windowCount, 'number', 'windowCount 要传出来');
+  // 窗口清空后，「最近一条」也不能变空
+  assert.equal(s.lastText, '第三条', '窗口空了要看 history 的最后一条');
+});
+
+test('collectState：有 windowCount 字段', () => {
+  const window = createContextWindow(10);
+  const router = createRouter([{ chatKind: 'group', chatId: '111' }]);
+  const m1 = msg('嗨', '小A', '111');
+  window.push('group:111', m1);
+  const state = collectState({
+    adapter: { running: true, url: '' },
+    window,
+    router,
+    summaries: new Map(),
+    history: [{ key: 'group:111', sender: '小A', text: '嗨', time: m1.time }],
+    config: { adapter: 'onebot' },
+    version: '0.0.4',
+  });
+  const s = state.sessions[0];
+  assert.ok('windowCount' in s, '必须带 windowCount');
+  assert.equal(s.windowCount, 1);
+});

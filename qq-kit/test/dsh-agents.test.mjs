@@ -371,3 +371,58 @@ test('提示词：表情包是动作象征，不是拿物种说事', async () =>
   assert.match(captured, /不代表在说那个东西/, '要说明图里的物种不是骂人的话');
   assert.match(captured, /happy=/, '分类要带解释');
 });
+
+test('上下文分三层：当前话题 / 之前聊的 / 刚说过的话 / 要接的消息', async () => {
+  const { createLlmThinker } = await import('../src/dsh-agents.js');
+  const now = Date.now();
+  let captured = '';
+  const thinker = createLlmThinker(
+    {
+      agents: {
+        runOnce: async (_n, p) => {
+          captured = p;
+          return JSON.stringify({ send: true, text: '嗯', thought: 'x' });
+        },
+      },
+    },
+    {
+      renderMessages: (msgs) =>
+        msgs.map((m) => `${m.sender?.name}: ${(m.segments ?? []).map((s) => s.text ?? '').join('')}`).join('\n'),
+    },
+  );
+
+  const older = [
+    { id: '1', sender: { name: '甲' }, segments: [{ type: 'text', text: '那个红米怎么样' }], time: now - 60000 },
+    { id: '2', sender: { name: '乙' }, segments: [{ type: 'text', text: '还行' }], time: now - 50000 },
+  ];
+  const batch = [{ id: '3', sender: { name: '甲' }, segments: [{ type: 'text', text: '那我买了' }], time: now }];
+
+  await thinker.think(
+    { sessionKey: 'group:1', messages: batch, window: [...older, ...batch] },
+    { text: '在聊买手机', topic: '红米手机推荐' },
+  );
+
+  assert.match(captured, /【当前话题】红米手机推荐/);
+  assert.match(captured, /【之前聊的】在聊买手机/);
+  assert.match(captured, /【刚说过的话】/, '要有最近原话这一层');
+  assert.match(captured, /甲: 那个红米怎么样/, '窗口里的旧话要带上来');
+  assert.match(captured, /【要接的消息】/);
+
+  // 本批消息不能在「刚说过的话」里重复出现
+  const midSection = captured.split('【刚说过的话】')[1].split('【要接的消息】')[0];
+  assert.ok(!midSection.includes('那我买了'), '要接的那批不该在"刚说过"里重复');
+});
+
+test('上下文：没有摘要时不留空标题', async () => {
+  const { createLlmThinker } = await import('../src/dsh-agents.js');
+  let captured = '';
+  const thinker = createLlmThinker(
+    { agents: { runOnce: async (_n, p) => { captured = p; return '{"send":true,"text":"嗯","thought":"x"}'; } } },
+    { renderMessages: () => '甲: 你好' },
+  );
+  const msg = { id: '1', sender: { name: '甲' }, segments: [{ type: 'text', text: '你好' }], time: Date.now() };
+  await thinker.think({ sessionKey: 'group:1', messages: [msg], window: [msg] }, null);
+  assert.ok(!captured.includes('【之前聊的】'), '没摘要就不该有这一层');
+  assert.ok(!captured.includes('【刚说过的话】'), '窗口里只有本批消息时不该有');
+  assert.match(captured, /【要接的消息】/);
+});

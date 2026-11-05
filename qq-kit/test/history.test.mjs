@@ -87,3 +87,29 @@ test('history：单日超过上限就不再写', () => {
   assert.ok(size < 20, `超限后应该停写，实际写了 ${size} 行`);
   assert.ok(size > 0, '至少要写进去一条');
 });
+
+// ── 保留策略：别自动删数据 ──
+//
+// 2026-11-05：原来情绪点留 7 天 / 2000 条、历史日志留 30 天，
+// 等于一个月前的记录自动消失。用户明确说过"不要让这些消失"。
+
+test('history 日志：默认保留一年，不是 30 天', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { createHistoryLog } = await import('../src/history.js');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hist-keep-'));
+  // 造几个旧文件
+  const old = ['2025-01-01', '2025-06-01', '2026-10-01'];
+  for (const d of old) fs.writeFileSync(path.join(dir, `history-${d}.jsonl`), '{"type":"recv"}\n');
+
+  // 不传 keepDays，用默认
+  const log = createHistoryLog({ dir, prefix: 'history' });
+  log.write('recv', { key: 'group:1', senderId: '1', senderName: 'a', text: 'hi', time: Date.now() });
+  log.close?.();
+
+  // 一年内的都该还在
+  assert.ok(fs.existsSync(path.join(dir, 'history-2026-10-01.jsonl')), '一个月前的日志不该被删');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

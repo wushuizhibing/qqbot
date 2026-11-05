@@ -20,7 +20,8 @@ import { collectPeople, relationSummary } from './people.js';
 
 /** 同一条情绪在这段时间内只更新不新增 */
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
-const MAX_POINTS = 2000;
+// 内置情绪中枢的内存上限（没装 mood-kit 时才用）。跟着放宽，别把长历史截掉。
+const MAX_POINTS = 20000;
 
 /**
  * 建一个内置情绪中枢（接口对齐 dsh-mood-kit 的 ctx.moodKit）。

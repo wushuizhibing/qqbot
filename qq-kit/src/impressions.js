@@ -17,7 +17,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** 单人印象的最大长度（字）。超过就截断，别让一条记忆吃掉半屏 prompt。 */
-export const IMPRESSION_MAX = 60;
+// 印象要短。它是每轮都进 prompt 的东西——写 60 字，二十个人就是 1200 字，
+// 全是钱。30 字够说清一个人是什么样，多的都是废话。
+export const IMPRESSION_MAX = 30;
 
 /** 一次最多更新几个人。太多会稀释质量。 */
 export const MAX_PEOPLE_PER_RUN = 6;
@@ -75,11 +77,41 @@ export function parsePeopleSection(memory) {
     if (!m) continue;
     const head = m[1];
     const name = head.replace(/[（(][^）)]*[）)]/g, '').replace(/`/g, '').trim();
-    const ids = line.match(/\d{5,}/g) ?? [];
-    const hex = line.match(/[0-9A-Fa-f]{32}/)?.[0] ?? '';
-    out.push({ line: i, name, id: ids[0] || hex, raw: line });
+    out.push({ line: i, name, id: extractId(line), raw: line });
   }
   return out;
+}
+
+/**
+ * 从一行里取出这个人的号。
+ *
+ * 优先级很重要 —— 踩过的坑：以前直接 `line.match(/\d{5,}/g)` 扫全行，
+ * 于是 `（`2729BB896205BA354B077BB70DD7679A`）` 这种 openid 里的
+ * 中间一段 `896205` 会被当成 QQ 号，面板上就多出一个查无此人的节点。
+ *
+ * 正确顺序：
+ *   ① 括号里明确写的 QQ 号       （QQ 123456）/ (123456)
+ *   ② 完整的 32 位 openid        （`ABCD...`）
+ *   ③ 实在没有，才退回去扫行里的裸数字
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+export function extractId(line) {
+  const text = String(line ?? '');
+
+  // ① 括号里的 QQ 号：先剥掉 openid（它也是括号内容，容易混）
+  const withoutHex = text.replace(/[0-9A-Fa-f]{32}/g, '');
+  const qq = withoutHex.match(/[（(]\s*(?:QQ|qq)?\s*[:：]?\s*(-?\d{5,})\s*[)）]/);
+  if (qq) return qq[1].replace(/^-/, '');
+
+  // ② 完整的 32 位 openid
+  const hex = text.match(/[0-9A-Fa-f]{32}/)?.[0] ?? '';
+  if (hex) return hex;
+
+  // ③ 兜底：行里的裸数字（但没有括号的暗示，只能算勉强）
+  const bare = text.match(/\d{5,}/g) ?? [];
+  return bare[0] ?? '';
 }
 
 /**

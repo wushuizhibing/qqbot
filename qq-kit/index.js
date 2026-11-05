@@ -17,7 +17,14 @@ import { loadPersona } from './src/persona.js';
 import { findSoulFile, describeSoulLocations } from './src/soul-finder.js';
 import { pickPeopleToUpdate, parsePeopleSection, mergeImpressions, writeMemoryFile, hasPersonEntry, addPersonEntry } from './src/impressions.js';
 import { createImpressionDistiller } from './src/impression-distill.js';
-import { loadGroupMemory, loadKnownUsers, renderMemoryBlock, trimGroupMemory, relationshipOf, relationshipHint } from './src/memory.js';
+import { diaryPath, parseDiary, renderDiary, mergeDiary, writeDiaryFile, pickPeopleForDiary } from './src/diary.js';
+import { createDiaryDistiller } from './src/diary-distill.js';
+import { renameInMemory, writeMemorySafely, RENAME_CHECK_MS } from './src/rename.js';
+import { findNotable, findNotableByGroup, observeState } from './src/state-observe.js';
+import { findArchivable, archiveSessions } from './src/archive.js';
+import { snapshot as snapCode, changedSince } from './src/staleness.js';
+import { renderDiaryHtml, listDiaryPeople, readDiary } from './src/diary-panel.js';
+import { loadGroupMemory, loadKnownUsers, renderMemoryBlock, trimGroupMemory, relationshipOf, relationshipHint, impersonationGuard } from './src/memory.js';
 import { createStore } from './src/storage.js';
 import { createLiveConfig } from './src/live-config.js';
 import { createBuiltinMood } from './src/mood-builtin.js';
@@ -58,7 +65,7 @@ export const name = 'qq-kit';
  */
 export const inject = [];
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 export function apply(ctx, bundleConfig = {}) {
   // 最外层兜底：apply 抛错时 DSH 会静默跳过整个插件，什么都看不到。
@@ -78,6 +85,12 @@ export function apply(ctx, bundleConfig = {}) {
 }
 
 function applyInner(ctx, bundleConfig) {
+  // 启动时给源码拍个快照。之后面板每次请求都会比对：
+  // 磁盘上的文件比这个新，就说明改了代码没重启 —— 面板顶部会顶一条黄条出来。
+  // 不这么做的话，改完不重启跑的还是旧代码，而界面看起来一切正常，
+  // 特别容易把"没生效"误判成"有 bug"。
+  const bootSnapshot = snapCode();
+
   const config = {
     adapter: 'mock',
     merge: { windowMs: 2000, maxMessages: 20, maxWaitMs: 8000 },
@@ -107,12 +120,58 @@ function applyInner(ctx, bundleConfig) {
       enabled: true,
       // 新人第一次说话就建档（不等 6 小时批量更新）
       autoAddPeople: true,
+      // 群友改名后自动更新记忆里的名字（按 QQ 号认人，名字只是显示用）
+      syncRename: true,
       // 多久跑一次（默认 6 小时：够久能看出变化，又不至于每次都调模型）
       intervalMs: 6 * 60 * 60 * 1000,
       // 看多久以内的流水
       lookbackMs: 24 * 60 * 60 * 1000,
       // 一次更新几个人
       maxPeople: 6,
+    },
+    // 个人日记：把关键事件按人归档（要求 / 冲突 / 承诺 / 重要信息），纯闲聊不记。
+    // 跟印象分工不同：印象进 prompt（短），日记只给人看（具体、带时间）。
+    // 设 false 关闭；dir 留空 = memoryDir 旁边的 qq-diary。
+    diary: {
+      enabled: true,
+      dir: '',
+      // 多久跑一次（默认 6 小时，跟印象一起）
+      intervalMs: 6 * 60 * 60 * 1000,
+      // 看多久以内的流水
+      lookbackMs: 24 * 60 * 60 * 1000,
+      // 一次最多处理几个人
+      maxPeople: 8,
+    },
+    // 状态观察：从流水里看作息/活跃度/语言的变化。
+    //
+    // ⚠️ 这些数据**只在后台算，不往面板上放，也不拿去跟当事人互动**。
+    //
+    // 2026-11-05 定下的：被人从聊天记录里算出来"状态不好"，
+    // 然后由机器人决定要不要去关心 —— 那不是关心，是居高临下。
+    // 真关心在当场那句接话里，不从数据推。详见 src/state-observe.js 文件头。
+    //
+    // 现在保留计算是为了以后能「汇报」：需要时调 api.stateWatch 拿数据，
+    // 但不会自动显示、不会自动发消息。
+    stateWatch: {
+      enabled: true,
+      // 一次最多返回几个人（0 = 不限）。只在主动索取时影响结果条数。
+      limit: 0,
+    },
+    // 会话归档：把堆着的 QQ 空壳会话挪到备份目录。
+    //
+    // 为什么需要：qq-kit 每轮对话都让 DSH 建一个 agent 会话，
+    // 跑几天就是几千个，左侧栏全是看不出区别的"新会话"。
+    //
+    // 已经确认这些会话文件里**只有元信息、没有对话内容**（正文在 history-*.jsonl），
+    // 所以挪走是零损失的 —— 而且只挪，不删，随时能挪回来。
+    archive: {
+      enabled: true,
+      // 多久没动才算旧
+      keepDays: 7,
+      // 每 6 小时检查一次（归档不是急事，没必要更频繁）
+      intervalMs: 6 * 60 * 60 * 1000,
+      // 只归档空壳。有对话内容的会话哪怕过期了也留着 —— 那种删了补不回来。
+      onlyEmpty: true,
     },
     // 每几轮真跑一次总结（其余轮次复用上一轮摘要，省一次模型调用）
     summarizeEvery: 3,
@@ -124,6 +183,11 @@ function applyInner(ctx, bundleConfig) {
     // 被 @ 的消息必须马上处理，不受每分钟限流压制
     // selfId 是机器人自己的 QQ 号（配了才认得出 @我；@全体成员一律算）
     selfId: '',
+    // 主人的 QQ 号。填上之后，只有这个号能被认作主人。
+    //
+    // 留空 = 只按群记忆判（记忆里写了谁是主人）。
+    // 建议填：记忆文件是模型自动维护的，可能写错；写死的号不会。
+    ownerId: '',
     atUrgent: true,
     // 识图：图片下载转多模态输入。设 false 关闭。
     vision: { maxImages: 3, maxBytes: 4 * 1024 * 1024 },
@@ -298,6 +362,15 @@ function applyInner(ctx, bundleConfig) {
   let agents = null;
   const fallbackSummarizer = createStubSummarizer();
   const fallbackThinker = createStubThinker();
+  // renderMessages 的包装：把 selfId 带进去，@我 才能单独标出来。
+  //
+  // 直接传函数的话 dsh-agents 那边拿不到配置，@ 段只能渲染成裸号和名字，
+  // 分不出"@ 我"和"@ 别人" —— 而这正好是判断"这句话冲谁来的"的关键。
+  const renderMessagesWithSelf = (messages, context) =>
+    renderMessages(messages, context, {
+      selfId: cfg().selfId || config.adapterOptions?.selfId || '',
+    });
+
   const llmSummarizer = createLlmSummarizer(
     {
       get agents() {
@@ -306,7 +379,7 @@ function applyInner(ctx, bundleConfig) {
       // 探针回调：把模型原始情绪和"是否判定为照抄"写进 trace，排查情绪卡死用
       trace: (event, data) => trace.write(event, data),
     },
-    { renderMessages },
+    { renderMessages: renderMessagesWithSelf },
   );
 
   // 记忆：思考子代理每轮都带「这个群的档案 + 认识的人」，按会话键取，不跨群串。
@@ -357,12 +430,23 @@ function applyInner(ctx, bundleConfig) {
         const senderId = String(message?.sender?.id ?? '');
         if (!senderId) return '';
         const memory = loadGroupMemory({ memoryDir: config.memoryDir, chatId: groupId, warn: (m) => log('warn', m) });
-        if (!memory) return '';
-        const rel = relationshipOf(memory, senderId);
-        return `当前说话的人（${senderId}）：${relationshipHint(rel)}`;
+        // 防御性提醒无条件带上：就算记忆读不到，也告诉它"认号不认自称"。
+        const ownerId = String(cfg().ownerId || '').trim();
+        const guard = impersonationGuard({ ownerId });
+        if (!memory) return guard;
+        let rel = relationshipOf(memory, senderId);
+        // 配了 ownerId 就一票否决：只有那个号能是主人。
+        //
+        // 光靠记忆判不够 —— 记忆文件是模型自动维护的，理论上可能被写错，
+        // 也可能被"记忆里加一句我是主人"这种操作污染。写死的号不会变。
+        if (ownerId && rel === 'owner' && senderId !== ownerId) {
+          rel = 'stranger';
+          trace.write('owner-reject', { sessionKey, senderId, ownerId });
+        }
+        return `${guard}\n当前说话的人（${senderId}）：${relationshipHint(rel, { ownerId })}`;
       },
     },
-    { renderMessages },
+    { renderMessages: renderMessagesWithSelf },
   );
 
   if (config.useDshAgents !== false && !config.summarizer && !config.thinker) {
@@ -449,6 +533,12 @@ function applyInner(ctx, bundleConfig) {
     {},
   );
 
+  // 日记提炼器：跟印象同一个子代理通道，但问的是"发生过什么"而不是"是什么样"。
+  const diaryDistiller = createDiaryDistiller(
+    { get agents() { return agents; }, trace: (e, d) => trace.write(e, d) },
+    {},
+  );
+
   /** 上次更新印象的时间（每个群一个） */
   /** @type {Map<string, number>} */
   const lastImpressionAt = new Map();
@@ -481,7 +571,14 @@ function applyInner(ctx, bundleConfig) {
     const since = now - (Number(ic?.lookbackMs) || 24 * 60 * 60 * 1000);
     const records = history.filter((h) => h.key === `group:${groupId}` && h.time >= since && h.text);
     const picked = pickPeopleToUpdate(
-      records.map((h) => ({ sender: h.sender, senderId: h.id, text: h.text, time: h.time })),
+      // 跟日记那边同一个坑：senderId 要用发送者的号，不是消息 id。
+      // 老流水没有 senderId（那版只存了名字），退回用名字当键 —— 不精确但总比丢掉强。
+      records.map((h) => ({
+        sender: h.sender,
+        senderId: h.senderId || `name:${h.sender}`,
+        text: h.text,
+        time: h.time,
+      })),
       Number(ic?.maxPeople) || 6,
     );
     if (picked.length === 0) return { updated: 0, reason: 'no messages' };
@@ -519,6 +616,107 @@ function applyInner(ctx, bundleConfig) {
     return { updated: withIds.length };
   }
 
+  // ── 个人日记 ──────────────────────────────────────────
+  //
+  // 跟印象分工不同：
+  //   印象 —— 这个人是什么样（短，长期稳定，进 prompt）
+  //   日记 —— 这个人身上发生过什么（具体，按时间排，只给人看）
+  //
+  // 只记关键事件（要求、冲突、承诺、重要信息），纯闲聊不记。
+  // 成本：跟印象一起 6 小时跑一次，一次最多 8 个人。
+
+  /** @type {Map<string, number>} groupId → 上次更新时间 */
+  const lastDiaryAt = new Map();
+
+  /**
+   * 从群记忆里取"这个群都有谁"，给日记面板补全用。
+   *
+   * 为什么需要：日记是按需生成的（说过关键事件才有文件），
+   * 光看日记目录只能看到零星几个人，看起来像漏了一大半。
+   * 名单从记忆里来，按 QQ 号对上，没日记的人也能列出来。
+   *
+   * @param {string} groupId
+   * @returns {Array<{ id: string, name: string }>}
+   */
+  function memoryRoster(groupId) {
+    if (!config.memoryDir) return [];
+    try {
+      const memory = loadGroupMemory({
+        memoryDir: config.memoryDir,
+        chatId: String(groupId),
+        warn: () => {},
+      });
+      if (!memory) return [];
+      return parsePeopleSection(memory)
+        .filter((p) => p.id) // 没号的没法建档，跳过
+        .map((p) => ({ id: String(p.id), name: String(p.name || p.id) }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 给一个群更新群友日记。
+   * @param {string} groupId
+   */
+  async function refreshDiaries(groupId) {
+    const dc = cfg().diary;
+    if (dc === false || dc?.enabled === false) return { written: 0, reason: 'disabled' };
+    const root = dc?.dir || (config.memoryDir
+      ? path.join(path.dirname(config.memoryDir), 'qq-diary')
+      : '');
+    if (!root) return { written: 0, reason: 'no diaryDir' };
+    if (!agents) return { written: 0, reason: 'agents not ready' };
+
+    const everyMs = Number(dc?.intervalMs) || 6 * 60 * 60 * 1000;
+    const now = Date.now();
+    if (now - (lastDiaryAt.get(groupId) ?? 0) < everyMs) return { written: 0, reason: 'too soon' };
+
+    const since = now - (Number(dc?.lookbackMs) || 24 * 60 * 60 * 1000);
+    const records = history.filter((h) => h.key === `group:${groupId}` && h.time >= since && h.text);
+    const picked = pickPeopleForDiary(
+      // 这里要用 **发送者的号**，不能用消息 id。
+      //
+      // 踩过的坑：原来写的是 `id: h.id`，那是消息 ID —— 每条都不一样，
+      // 于是"按人聚合"完全失效，8 个名额被同一个人（的 8 条消息）占满，
+      // 一批只能覆盖两三个人。h.senderId 才是发送者的 QQ 号。
+      records.map((h) => ({ id: h.senderId || `name:${h.sender}`, name: h.sender })),
+      Number(dc?.maxPeople) || 8,
+    );
+    if (picked.length === 0) return { written: 0, reason: 'no messages' };
+
+    const events = await diaryDistiller.distill({
+      names: picked.map((p) => p.name),
+      records: records.map((h) => ({ sender: h.sender, text: h.text, time: h.time })),
+    });
+    if (events.length === 0) {
+      lastDiaryAt.set(groupId, now);
+      return { written: 0, reason: 'nothing key' };
+    }
+
+    // 按名字回落到人（模型只给名字，号从我们挑的人里对）
+    let written = 0;
+    for (const ev of events) {
+      const who = picked.find((p) => p.name.toLowerCase() === ev.name.toLowerCase());
+      if (!who) continue;
+      const file = diaryPath(root, groupId, who.id);
+      let old = { name: who.name, userId: who.id, intro: '', events: [] };
+      try {
+        old = { ...old, ...parseDiary(fs.readFileSync(file, 'utf8')), userId: who.id };
+      } catch {
+        /* 第一次写，用默认空日记 */
+      }
+      const merged = mergeDiary(old, [{ at: now, text: ev.text }], { name: who.name });
+      writeDiaryFile(file, renderDiary(merged));
+      written += 1;
+    }
+
+    lastDiaryAt.set(groupId, now);
+    log('info', `群友日记已更新：${written} 条（群 ${groupId}）`);
+    trace.write('diary', { groupId, written, events: events.slice(0, 5) });
+    return { written, events };
+  }
+
   /** 每个会话上一条消息的时间：判断冷场 */
   /** @type {Map<string, number>} */
   const lastSeenAt = new Map();
@@ -534,11 +732,126 @@ function applyInner(ctx, bundleConfig) {
   const seenPeople = new Set();
   /** @type {Set<string>} 读不到记忆文件的群，别反复试 */
   const noMemoryFile = new Set();
+  /** @type {Map<string, number>} "群号:QQ号" → 上次检查改名的时间 */
+  const lastRenameCheck = new Map();
 
   /**
    * @param {string} key sessionKey
    * @param {any} msg
    */
+  /**
+   * 是不是官方机器人 / 管家类账号。
+   *
+   * 这些不是群友：不建档、不参与关系判定。
+   * 判据只看名字（协议端口径不一，有的给 isRobot 有的不给），宁可漏判也别误杀真人——
+   * 所以只匹配明确的机器人词，不用"助手""小助手"这种真人也会用的。
+   *
+   * @param {string} name
+   */
+  function isBotAccount(name) {
+    const n = String(name ?? '');
+    if (!n) return false;
+    return /群管家|群助手|Q群|bot$|机器人$|^.bot|官方客服|系统消息/i.test(n);
+  }
+
+  /**
+   * 群友改名同步：记忆里的名字跟着群名片走。
+   *
+   * 频控：每人最多每 6 小时查一次盘 —— 名字不会每分钟变，
+   * 每条消息都读一遍记忆文件纯属浪费。
+   *
+   * 只改「名字」那一小段，「**（QQ xxx）**」和冒号后面的印象一个字不动。
+   *
+   * @param {string} groupId
+   * @param {string} userId
+   * @param {string} liveName 当前群名片
+   */
+  function syncRename(groupId, userId, liveName) {
+    const key = `${groupId}:${userId}`;
+    const now = Date.now();
+    if (now - (lastRenameCheck.get(key) ?? 0) < RENAME_CHECK_MS) return;
+    lastRenameCheck.set(key, now);
+    if (noMemoryFile.has(groupId)) return;
+
+    try {
+      const file = path.join(config.memoryDir, `${groupId}.md`);
+      let memory;
+      try {
+        memory = fs.readFileSync(file, 'utf8');
+      } catch {
+        noMemoryFile.add(groupId);
+        return;
+      }
+      const { memory: next, changed } = renameInMemory(memory, userId, liveName);
+      if (!changed) return;
+      writeMemorySafely(file, next);
+      log('info', `群友改名已同步：${liveName}（${userId}）@ ${groupId}`);
+      trace.write('rename', { groupId, userId, name: liveName });
+    } catch (error) {
+      // 改名失败不影响这条消息的处理
+      log('warn', `群友改名同步失败（${userId}）：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * 从按天落盘的历史日志里读消息（给状态观察用）。
+   *
+   * 内存里那个 history 只有 200 条，用来比「最近 vs 平时」根本不够 ——
+   * 得翻当天的日志文件。只读最近几个文件，且只读到需要的字段。
+   *
+   * 读不到就返回空数组：状态观察是锦上添花，不能因为它让面板崩掉。
+   *
+   * @param {number} since 只要这个时间之后的
+   * @returns {Array<{senderId:string, senderName:string, time:number, text:string}>}
+   */
+  function readHistoryLogs(since) {
+    if (!historyDir) return [];
+    try {
+      if (!fs.existsSync(historyDir)) return [];
+      const files = fs
+        .readdirSync(historyDir)
+        .filter((f) => f.endsWith('.jsonl'))
+        .sort()
+        .slice(-10); // 最多翻 10 天，再多没必要
+      const out = [];
+      for (const f of files) {
+        let raw;
+        try {
+          raw = fs.readFileSync(path.join(historyDir, f), 'utf8');
+        } catch {
+          continue;
+        }
+        for (const line of raw.split('\n')) {
+          if (!line.startsWith('{')) continue;
+          let j;
+          try {
+            j = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (j.type !== 'recv') continue;
+          const time = Number(j.time);
+          if (!(time >= since)) continue;
+          const senderId = String(j.senderId ?? '');
+          const text = String(j.text ?? '');
+          if (!senderId || !text) continue;
+          out.push({
+            // 群号（group:xxx）—— 状态观察要按群分开算，没这个字段就只能全混一起
+            key: String(j.key ?? ''),
+            senderId,
+            senderName: String(j.senderName ?? senderId),
+            time,
+            text,
+          });
+        }
+      }
+      return out;
+    } catch (error) {
+      log('warn', `读历史日志失败（状态观察）：${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
   function noteStranger(key, msg) {
     const ic = cfg().impressions;
     if (ic === false || ic?.enabled === false || ic?.autoAddPeople === false) return;
@@ -548,6 +861,13 @@ function applyInner(ctx, bundleConfig) {
     const senderId = String(msg?.sender?.id ?? '').trim();
     const senderName = String(msg?.sender?.name ?? '').trim();
     if (!senderId || !senderName) return;
+    // 官方机器人 / 管家类账号不建档：它们不是群友，建了也是噪声，
+    // 而且名字里带"群管""管理"还会被关系判定误认成管理员。
+    if (isBotAccount(senderName)) return;
+
+    // 改名同步：不管有没有建过档，名字变了就跟着改。
+    // 放在建档之前 —— 有时候人已经在档案里了，只是名字旧了。
+    if (ic?.syncRename !== false) syncRename(groupId, senderId, senderName);
 
     const mark = `${groupId}:${senderId}`;
     if (seenPeople.has(mark) || noMemoryFile.has(groupId)) return;
@@ -593,6 +913,55 @@ function applyInner(ctx, bundleConfig) {
   /** @type {any[]} */
   const history = [];
 
+  // 启动时从今天的日志回填 history。
+  //
+  // 为什么必须回填：history 是纯内存的，DSH 一重启就清空，
+  // 于是面板上「消息」显示 0、「最近一条」空白 —— 哪怕群里刚刚还在聊，
+  // 日志文件里明明躺着几百条。看起来就像"收不到消息"，其实只是没读回来。
+  //
+  // 只读当天、只要最近 200 条（跟内存上限一致），不碰冷启动之外的情况。
+  try {
+    if (historyDir && fs.existsSync(historyDir)) {
+      const today = new Date().toISOString().slice(0, 10);
+      const file = path.join(historyDir, `history-${today}.jsonl`);
+      if (fs.existsSync(file)) {
+        const recs = [];
+        for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+          if (!line.startsWith('{')) continue;
+          let j;
+          try {
+            j = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (j.type !== 'recv') continue;
+          const key = String(j.key ?? '');
+          const text = String(j.text ?? '');
+          if (!key || !text) continue;
+          recs.push({
+            key,
+            id: j.id,
+            sender: String(j.senderName ?? ''),
+            senderId: String(j.senderId ?? ''),
+            text,
+            time: Number(j.time) || 0,
+            // 这几个字段只有实时消息才有，回填的一律留空
+            thought: '',
+            reply: '',
+            replyAt: 0,
+          });
+        }
+        // 只留最后 200 条，跟运行时上限一致
+        const tail = recs.slice(-200);
+        history.push(...tail);
+        if (tail.length) log('info', `从今天的日志回填了 ${tail.length} 条消息流水`);
+      }
+    }
+  } catch (error) {
+    // 回填失败不影响收发，只是面板上少点历史
+    log('warn', `回填消息流水失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+
   // ── 往 mood-kit 面板贡献 QQ 侧数据 ──
   //
   // mood-kit 是独立插件，它不知道有 QQ 在跑。这里反向注册一个供给函数，
@@ -608,15 +977,38 @@ function applyInner(ctx, bundleConfig) {
           const sessions = [...new Set([...router.list().map((r) => `group:${r.chatId}`), ...history.map((h) => h.key)])]
             .map((key) => {
               const items = window.get(key);
-              const last = items[items.length - 1];
+              const hist = history.filter((h) => h.key === key);
               const routed = router.list().some((r) => `group:${r.chatId}` === key);
+
+              // 「最近一条」优先看窗口里那条（带完整 segments），
+              // 窗口空了就退回 history 里最后一条 —— 只用窗口的话，
+              // 冷场一轮之后这一列会突然变空，看着像消息没收到。
+              const lastWin = items[items.length - 1];
+              const lastHist = hist[hist.length - 1];
+              let lastText = '';
+              let lastSender = '';
+              let lastAt = null;
+              if (lastWin) {
+                lastText = toPlainText(lastWin.segments).slice(0, 120);
+                lastSender = lastWin.sender?.name ?? '';
+                lastAt = lastWin.time ?? null;
+              } else if (lastHist) {
+                lastText = String(lastHist.text ?? '').slice(0, 120);
+                lastSender = String(lastHist.sender ?? '');
+                lastAt = lastHist.time ?? null;
+              }
+
               return {
                 key,
                 routed,
-                count: items.length,
-                lastText: last ? toPlainText(last.segments).slice(0, 120) : '',
-                lastSender: last?.sender?.name ?? '',
-                lastAt: last?.time ?? null,
+                // 「消息」这一列给的是**今天收到多少条**（history 不被清空），
+                // 不是窗口里还剩几条 —— 窗口每轮清空，拿它当"消息数"会让人以为没收到。
+                count: hist.length,
+                // 窗口里攒着多少条上下文，另开一列，不混淆
+                windowCount: items.length,
+                lastText,
+                lastSender,
+                lastAt,
               };
             });
           return {
@@ -635,6 +1027,103 @@ function applyInner(ctx, bundleConfig) {
             liveConfigFile: live.file,
             sessions,
             recent: history.slice(-30).reverse(),
+            // 代码没重启的提醒（mood-kit 面板也会显示）
+            stale: changedSince(bootSnapshot),
+            // 状态观察：从今天+昨天的流水里看每个人的作息/活跃度/语言变化。
+            //
+            // 这只是**行为统计**，不是心理判断 —— 前端也按"值得留意"来措辞，
+            // 不给任何诊断标签。
+            //
+            // 默认只算、不主动关心。以后要做主动关心，读这里的 signals 就行。
+            stateWatch: (() => {
+              const sw = cfg().stateWatch;
+              if (sw === false || sw?.enabled === false) return { people: [], note: '未启用' };
+              try {
+                // 只用最近 10 天的流水：基线窗口就 7 天，再往前没意义
+                const cutoff = Date.now() - 10 * 24 * 60 * 60 * 1000;
+                const recentRecs = history
+                  .filter((h) => h.time >= cutoff && h.senderId && h.text)
+                  .map((h) => ({
+                    key: h.key,
+                    senderId: h.senderId,
+                    senderName: h.sender,
+                    time: h.time,
+                    text: h.text,
+                  }));
+                // 内存里只有 200 条，不够比基线 —— 从当天落盘日志补
+                const fromLog = readHistoryLogs(cutoff);
+                const records = fromLog.length ? fromLog : recentRecs;
+                // limit 传 0（或没配）就是不限制，别再拿 || 兜到 8 —— 那等于又偷偷截断
+                const lim = Number(sw?.limit);
+                // 按群分开算：同一个号在两个群里状态可能完全不同，混着算会把两边都稀释
+                const byGroup = findNotableByGroup(records, { limit: Number.isFinite(lim) ? lim : 0 });
+                const mapPeople = (rows) =>
+                  rows.map((r) => ({
+                    id: r.id,
+                    name: r.name,
+                    warns: r.warns,
+                    // 严重度：面板按这个从高到低排
+                    severity: r.severity,
+                    // 「可能只是忙」「像是心里有事」这类猜测标签
+                    tags: r.tags ?? [],
+                    note: r.state.note,
+                    signals: r.state.signals,
+                  }));
+                const groups = byGroup.groups.map((g) => {
+                  const chatId = String(g.key).startsWith('group:') ? String(g.key).slice('group:'.length) : '';
+                  const rule = chatId ? router.list().find((r) => r.chatKind === 'group' && String(r.chatId) === chatId) : null;
+                  return {
+                    key: g.key,
+                    // 面板上显示的名字：路由里配了 label 就用它，否则用群号
+                    label: rule?.label || chatId || g.key,
+                    people: mapPeople(g.people),
+                  };
+                });
+                return {
+                  groups,
+                  // 兼容老面板：把所有人摊平放一份
+                  people: groups.flatMap((g) => g.people),
+                  note: '',
+                };
+              } catch (error) {
+                log('warn', `状态观察失败：${error instanceof Error ? error.message : String(error)}`);
+                return { groups: [], people: [], note: '计算失败' };
+              }
+            })(),
+            // 群友日记：让情绪面板里直接能翻，不用另外开一个页面。
+            //
+            // 只给最近活跃的几个人、每人最多 30 条 —— 面板 2 秒刷一次，
+            // 数据包太大每次都在传没意义。
+            diary: (() => {
+              const dc = cfg().diary;
+              const root =
+                dc?.dir || (config.memoryDir ? path.join(path.dirname(config.memoryDir), 'qq-diary') : '');
+              if (dc === false || dc?.enabled === false || !root) return { root: '', groups: [] };
+              try {
+                const groups = router
+                  .list()
+                  .filter((r) => r.chatKind === 'group')
+                  .map((r) => {
+                    const gid = String(r.chatId);
+                    const people = listDiaryPeople(root, gid, { roster: memoryRoster(gid), ownerId: String(cfg().ownerId || "") }).slice(0, 40);
+                    const diaries = {};
+                    for (const p of people) {
+                      diaries[p.userId] = readDiary(root, gid, p.userId)
+                        .split(/\r?\n/)
+                        .filter((l) => /^\s*[-*]\s+\d{2}-\d{2}/.test(l))
+                        .slice(-30)
+                        .join('\n');
+                    }
+                    return { id: gid, people, diaries };
+                  });
+                return { root, groups };
+              } catch (error) {
+                trace.write('diary-panel-error', {
+                  message: error instanceof Error ? error.message : String(error),
+                });
+                return { root, groups: [] };
+              }
+            })(),
           };
         },
         /**
@@ -680,6 +1169,25 @@ function applyInner(ctx, bundleConfig) {
   if (!externalMood || typeof externalMood.observe !== 'function') externalMood = null;
   const mood = externalMood ?? createBuiltinMood(config, log);
   log('info', externalMood ? '情绪：使用外部 mood-kit 插件' : '情绪：使用内置实现（未装 dsh-mood-kit）');
+
+  // 把关系判定交给 mood-kit：面板上的人物星系就用我们这套（带防冒充的）。
+  //
+  // 不然两边各算各的：qq-kit 判"熟人"，面板可能判成"主人"，
+  // 用户看到的就是自相矛盾的画面。
+  if (externalMood && typeof externalMood.setRelationshipJudge === 'function') {
+    try {
+      externalMood.setRelationshipJudge((memory, userId) => {
+        const ownerId = String(cfg().ownerId || '').trim();
+        let rel = relationshipOf(memory, userId);
+        // 跟对话层同一条规则：配了 ownerId，只有那个号能是主人
+        if (ownerId && rel === 'owner' && String(userId) !== ownerId) rel = 'stranger';
+        return rel;
+      });
+      log('info', '人物关系判定：已交给 qq-kit（面板与对话层同一套规则）');
+    } catch (error) {
+      log('warn', `注册关系判定失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   /** 一批消息到了：落会话键 → 交给两段式桥接 → 执行侧发送 */
   merger.setHandler(async (key, items) => {
@@ -808,10 +1316,16 @@ function applyInner(ctx, bundleConfig) {
       // 把"心里那一下"挂到触发它的那条消息上，面板的最近消息里就能并排看到：
       //   谁说了什么 → 它心里怎么想的 → 它回了什么
       // 只进面板流水（history 是给 /qq-kit 和贡献给 mood-kit 的），不进群。
+      //
+      // thought 兜底：提示词里模板、示例、"必须写"全摆上了，模型还是经常留空
+      // （实测 trace 里 thought='' 是常态）。空着就等于这一栏白留，
+      // 所以退回用 mood —— 它本来就有值，也最接近"心里那一下"。
       const trigger = items[items.length - 1];
       const entry = trigger ? history.find((h) => h.id === trigger.id) : null;
       if (entry) {
-        entry.thought = plan.thought ?? '';
+        const planThought = String(plan.thought ?? '').trim();
+        const moodText = String(summary?.mood ?? '').trim();
+        entry.thought = planThought || moodText || '';
         entry.reply = toPlainText(plan.segments);
         entry.replyAt = Date.now();
       }
@@ -882,13 +1396,78 @@ function applyInner(ctx, bundleConfig) {
       if (!agents) return; // 子代理没就绪就跳过这一拍
       for (const rule of router.list()) {
         if (rule.chatKind !== 'group') continue;
-        void refreshImpressions(String(rule.chatId)).catch((error) => {
-          log('warn', `群友印象更新失败（${rule.chatId}）：${error instanceof Error ? error.message : String(error)}`);
+        const gid = String(rule.chatId);
+        void refreshImpressions(gid).catch((error) => {
+          log('warn', `群友印象更新失败（${gid}）：${error instanceof Error ? error.message : String(error)}`);
+        });
+        // 日记跟着印象一起跑：同一批流水，多一次调用换一份时间线
+        void refreshDiaries(gid).catch((error) => {
+          log('warn', `群友日记更新失败（${gid}）：${error instanceof Error ? error.message : String(error)}`);
         });
       }
     }, tickMs);
     impressionsTimer.unref?.();
     log('info', '群友印象自动更新已启用（每 30 分钟检查一次，实际间隔看配置）');
+  }
+
+  // ── QQ 空壳会话的定时归档 ──
+  //
+  // qq-kit 每轮对话都让 DSH 建一个 agent 会话，几天就堆出几千个，
+  // 左侧栏全是"新会话"，看不出哪个是哪个。
+  //
+  // 这些会话文件里只有元信息、没有对话内容（正文在 history-*.jsonl），
+  // 所以挪走是零损失的；而且只挪不删，随时能挪回来。
+  let archiveTimer = null;
+  const archiveCfg = cfg().archive;
+
+  /** 跑一次归档；返回统计，面板/日志都用它 */
+  function runArchive() {
+    const ac = cfg().archive;
+    if (ac === false || ac?.enabled === false) return { moved: 0, reason: 'disabled' };
+    const dshHome = process.env.DSH_HOME ?? os.homedir();
+    const sessionsRoot = ac?.sessionsRoot || path.join(dshHome, 'sessions');
+    const backupRoot = ac?.backupRoot || path.join(dshHome, 'sessions-backup');
+    if (!fs.existsSync(sessionsRoot)) return { moved: 0, reason: 'no sessions dir' };
+    try {
+      const found = findArchivable({
+        sessionsRoot,
+        keepDays: Number(ac?.keepDays) || 7,
+        onlyEmpty: ac?.onlyEmpty !== false,
+      });
+      if (found.candidates.length === 0) {
+        return { moved: 0, scanned: found.scanned, kept: found.skippedWithContent };
+      }
+      const res = archiveSessions(found.candidates, { backupRoot });
+      log(
+        'info',
+        `会话归档：挪走 ${res.moved} 个空壳（保留 ${found.skippedWithContent} 个有内容的）→ ${res.target}`,
+      );
+      trace.write('archive', {
+        moved: res.moved,
+        failed: res.failed,
+        kept: found.skippedWithContent,
+        scanned: found.scanned,
+        target: res.target,
+      });
+      return { moved: res.moved, failed: res.failed, kept: found.skippedWithContent, target: res.target };
+    } catch (error) {
+      log('warn', `会话归档失败：${error instanceof Error ? error.message : String(error)}`);
+      return { moved: 0, reason: 'error' };
+    }
+  }
+
+  if (archiveCfg !== false && archiveCfg?.enabled !== false) {
+    const intervalMs = Math.max(60 * 1000, Number(archiveCfg?.intervalMs) || 6 * 60 * 60 * 1000);
+    // 启动后先等两分钟再跑第一次：刚起来时别和一堆初始化抢 IO
+    const kickoff = setTimeout(() => {
+      void runArchive();
+    }, 2 * 60 * 1000);
+    kickoff.unref?.();
+    archiveTimer = setInterval(() => {
+      void runArchive();
+    }, intervalMs);
+    archiveTimer.unref?.();
+    log('info', `会话归档已启用：${Math.round(intervalMs / 3600000)} 小时检查一次，超过 ${archiveCfg?.keepDays || 7} 天的空壳会话挪到备份目录`);
   }
 
   const wireAdapter = (next) => {
@@ -915,6 +1494,12 @@ function applyInner(ctx, bundleConfig) {
           key,
           id: msg.id,
           sender: msg.sender?.name ?? msg.sender?.id ?? '',
+          // 发送者的号（QQ 号或 openid）。
+          //
+          // 之前只存名字，于是日记提炼时「谁说的」只能靠名字猜 ——
+          // 群里两个人同名、或者有人改名，就全乱了。
+          // 名字会变，号不会，所以这一列是必须的。
+          senderId: String(msg.sender?.id ?? ''),
           text: toPlainText(msg.segments),
           time: msg.time,
           // 这两个由 plan 回来后回填（面板上并排显示"它怎么想的 / 它回了什么"）。
@@ -1003,6 +1588,8 @@ function applyInner(ctx, bundleConfig) {
                     // 情绪数据：来自外部 mood-kit 或内置中枢，接口一致
                     moodState: mood,
                     externalMood: Boolean(externalMood),
+                    // 改了代码没重启时，面板顶部顶一条黄条
+                    stale: changedSince(bootSnapshot),
                   }),
                 );
                 res.writeHead(200, {
@@ -1011,6 +1598,62 @@ function applyInner(ctx, bundleConfig) {
                   'Cache-Control': 'no-store',
                 });
                 res.end(payload);
+              },
+            }),
+            // 群友日记：/qq-kit/diary
+            //
+            // 单独的页面，不进情绪面板 —— 它回答的是"这个人身上发生过什么"，
+            // 跟"整体情绪走势"不是一回事。
+            child.webServer.register({
+              kind: 'prefix',
+              path: '/qq-kit/diary',
+              handler: (req, res) => {
+                const diaryRoot =
+                  cfg().diary?.dir ||
+                  (config.memoryDir ? path.join(path.dirname(config.memoryDir), 'qq-diary') : '');
+                const url = new URL(req.url ?? '/', 'http://x');
+                const wantGroup = url.searchParams.get('group') ?? '';
+                const wantPerson = url.searchParams.get('person') ?? '';
+
+                // 有路由的群才列出来
+                const groups = router
+                  .list()
+                  .filter((r) => r.chatKind === 'group')
+                  .map((r) => ({
+                    id: String(r.chatId),
+                    label: `群 ${r.chatId}`,
+                    people: diaryRoot ? listDiaryPeople(diaryRoot, String(r.chatId), { roster: memoryRoster(String(r.chatId)), ownerId: String(cfg().ownerId || "") }) : [],
+                  }));
+
+                const activeGroup = groups.find((g) => g.id === wantGroup)?.id ?? groups[0]?.id ?? '';
+                const people = groups.find((g) => g.id === activeGroup)?.people ?? [];
+                // 没指定人就默认选第一个（最近说话的那个）。
+                // 不然一进来右边是空的，看着像"没数据"——其实数据都在。
+                const activePerson = people.find((p) => p.userId === wantPerson) ?? people[0] ?? null;
+
+                // 一次性把所有群的日记原文都带上：前端点击时只换视图、不发请求。
+                // 日记单文件最多 300 条事件，整包也就几十 KB，换掉每次点击的往返。
+                const diaries = {};
+                for (const g of groups) {
+                  for (const p of g.people) {
+                    diaries[`${g.id}/${p.userId}`] = readDiary(diaryRoot, g.id, p.userId);
+                  }
+                }
+
+                const html = renderDiaryHtml({
+                  groups,
+                  diaries,
+                  activeGroup,
+                  activePerson,
+                  content: activePerson ? readDiary(diaryRoot, activeGroup, activePerson.userId) : '',
+                  root: diaryRoot,
+                });
+                res.writeHead(200, {
+                  'Content-Type': 'text/html; charset=utf-8',
+                  'Content-Length': Buffer.byteLength(html),
+                  'Cache-Control': 'no-store',
+                });
+                res.end(html);
               },
             }),
             // 热更新接口：面板上改参数，写进 qq-kit-live.json，立刻生效
@@ -1113,6 +1756,20 @@ function applyInner(ctx, bundleConfig) {
      */
     refreshImpressions(groupId) {
       return refreshImpressions(String(groupId));
+    },
+    /**
+     * 手动触发一次群友日记更新（调试用；正常跟印象一起由定时器跑）。
+     * @param {string} groupId
+     */
+    refreshDiaries(groupId) {
+      return refreshDiaries(String(groupId));
+    },
+    /**
+     * 立刻跑一次会话归档。面板上的按钮和调试都用它。
+     * @returns {{moved:number, failed?:number, kept?:number, target?:string, reason?:string}}
+     */
+    runArchive() {
+      return runArchive();
     },
     /** 面板看情绪走势用（来自情绪中枢；未装 mood-kit 时是内置实现） */
     get moodHistory() {

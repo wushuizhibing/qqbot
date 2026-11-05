@@ -1,7 +1,5 @@
 # dsh-mood-kit
 
-![version](https://img.shields.io/badge/version-0.2.0-a78bfa?style=flat-square) ![license](https://img.shields.io/badge/license-MIT-4ade80?style=flat-square)
-
 情绪与关系记忆插件，**与聊天协议无关**。
 
 别的聊天插件（QQ / 微信 / Discord / 自己的玩具协议）负责产生情绪，
@@ -189,9 +187,7 @@ const now = moodKit?.current('group:123456');
 
 ```powershell
 # 1) clone 到任意目录
-# 国内用 Gitee，海外用 GitHub，内容一样
-git clone https://gitee.com/wushuizhibing/qqbot.git C:\plugins\qqbot
-# git clone https://github.com/wushuizhibing/qqbot.git C:\plugins\qqbot
+git clone <本仓库地址> C:\plugins\mood-kit
 
 # 2) 链进 DSH 的 profile
 New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-mood-kit" `

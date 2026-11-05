@@ -24,6 +24,9 @@ export function collectPanelState(deps) {
     moodHistory: {
       points,
       latest: points.length ? points[points.length - 1] : null,
+      // 历史累计（含被上限裁掉的）——「情绪点」那张卡用它。
+      // 用 points.length 的话，一到上限就永远显示 2000，看着像卡住。
+      total: typeof state.total === 'function' ? state.total() : points.length,
     },
     moodStats: state.stats(),
     people,
@@ -214,10 +217,68 @@ export function renderPanelHtml() {
   .chartlegend b{color:#e8823c;font-weight:500}
   .chartlegend i{color:#9aa6b8;font-style:normal}
 
+  /* 群友日记：左名单右时间线，点人不刷新 */
+  .diarywrap{display:grid;grid-template-columns:240px 1fr;gap:18px;align-items:start}
+  @media(max-width:720px){.diarywrap{grid-template-columns:1fr}}
+  .diarylist{display:flex;flex-direction:column;gap:5px;max-height:420px;overflow:auto}
+  .dperson{display:grid;grid-template-columns:1fr auto;gap:1px 9px;padding:9px 12px;cursor:pointer;position:relative;
+    border:1px solid var(--line);background:rgba(17,24,35,.6);transition:.15s;
+    clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+  .dperson:hover{border-color:rgba(56,189,248,.45)}
+  .dperson.on{border-color:var(--accent);background:rgba(56,189,248,.10)}
+  /* 主人置顶：金边 + 星标，跟「记住的人」那边一个样式 */
+  .dperson.pinned{border-color:rgba(251,191,36,.55);background:rgba(251,191,36,.07)}
+  .dperson.pinned .nm{color:#fde68a}
+  .dperson .pinmark{position:absolute;left:-1px;top:-1px;color:#fbbf24;font-size:9px;
+    line-height:1;padding:2px 3px}
+  .dperson .nm{font-size:13px;font-weight:700;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dperson .id{font-size:10px;color:var(--fg3);font-family:Consolas,monospace;grid-row:2}
+  .dperson .ct{font-size:10px;color:var(--fg3);grid-row:1/3;align-self:center;white-space:nowrap}
+  .diarydetail{border:1px solid var(--line);padding:0;background:rgba(13,18,25,.6);
+    /* 高度封顶：日记会一直往下攒，不封的话整个面板会被这一块越拉越长。
+       clip-path 会连滚动条一起裁掉，所以拆成两层：
+       外层负责裁角，内层负责滚动。 */
+    max-height:420px;display:flex;flex-direction:column;
+    clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+  .diarydetail .dscroll{padding:16px 20px;overflow-y:auto;overflow-x:hidden;min-height:180px}
+  .diarydetail h3{font-size:16px;margin-bottom:2px}
+  .diarydetail .qq{font-family:Consolas,monospace;font-size:11px;color:var(--fg3);margin-bottom:12px}
+  .dtl{list-style:none;display:flex;flex-direction:column;gap:1px}
+  .dtl li{display:grid;grid-template-columns:76px 1fr;gap:11px;padding:7px 0;border-bottom:1px dashed rgba(30,43,61,.7)}
+  .dtl li:last-child{border-bottom:0}
+  .dtl time{display:flex;flex-direction:column;font-family:Consolas,monospace;line-height:1.3}
+  .dtl time b{font-size:12px;color:var(--accent);font-weight:600}
+  .dtl time span{font-size:10px;color:var(--fg3)}
+  .dtl p{font-size:13px;line-height:1.55;color:var(--fg2)}
+  .hint{font-size:12px;color:var(--fg3);padding:8px 0}
+
   .starbox{display:flex;gap:22px;flex-wrap:wrap}
   .starcard{flex:1 1 340px;min-width:300px}
   #star{width:100%;height:300px;display:block}
-  #people{width:100%;height:460px;display:block}
+  #people{width:100%;height:460px;display:block;touch-action:none;cursor:grab}
+  /* 星系参数滑条 */
+  .galsliders{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:10px;align-items:center}
+  .galsliders label{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--fg3)}
+  .galsliders label span{width:24px;flex:none}
+  .galsliders input[type=range]{width:78px;height:3px;-webkit-appearance:none;appearance:none;
+    background:var(--line2);outline:none;border-radius:2px}
+  .galsliders input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;
+    background:var(--accent);border-radius:50%;cursor:pointer;box-shadow:0 0 8px var(--glow)}
+  .galsliders label em{font-style:normal;font-family:Consolas,monospace;color:var(--accent);width:34px;font-size:10.5px}
+  .galauto{font-size:11px;padding:3px 10px;cursor:pointer;font-family:inherit;
+    border:1px solid var(--line2);background:transparent;color:var(--fg3);
+    clip-path:polygon(0 0,calc(100% - 7px) 0,100% 7px,100% 100%,7px 100%,0 calc(100% - 7px))}
+  .galauto.on{border-color:rgba(56,189,248,.5);color:var(--accent);background:rgba(56,189,248,.1)}
+  /* 选中后的详情条 */
+  #galaxyDetail:empty{display:none}
+  .gdet{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:9px 13px;
+    border:1px solid var(--line);background:rgba(17,24,35,.72);
+    clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+  .gdet .gnm{font-size:14px;font-weight:700;color:var(--fg)}
+  .gdet .gid{font-size:11px;color:var(--fg3);font-family:Consolas,monospace}
+  .gdet .grel{font-size:11px;padding:1px 8px;border:1px solid;border-radius:2px}
+  .gdet .ggrp{font-size:11px;color:var(--fg3)}
+  .gdet .gnote{font-size:12px;color:var(--fg2);flex:1 1 100%;line-height:1.5}
   .starlabels{display:flex;flex-wrap:wrap;gap:7px 15px;margin-top:9px;font-size:11px;
     color:var(--fg2);letter-spacing:.5px}
   .starlabel{display:flex;align-items:center;gap:6px}
@@ -242,8 +303,14 @@ export function renderPanelHtml() {
 
   .peoplelist{max-height:460px;overflow:auto}
   .plrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #16202e;
-    transition:background .15s,box-shadow .15s}
+    transition:background .15s,box-shadow .15s;cursor:pointer}
   .plrow:hover{background:rgba(56,189,248,.05);box-shadow:inset 2px 0 0 var(--accent)}
+  .plrow.on{background:rgba(56,189,248,.13);box-shadow:inset 2px 0 0 var(--accent)}
+  .plrow.on .nm{color:var(--accent)}
+  /* 置顶那位：金边 + 星标，第一眼就找得到 */
+  .plrow.pinned{background:rgba(251,191,36,.06);box-shadow:inset 2px 0 0 #fbbf24}
+  .plrow.pinned .nm{color:#fde68a;font-weight:700}
+  .pinmark{color:#fbbf24;font-size:10px;flex:none;margin-left:-4px}
   .plrow:last-child{border-bottom:none}
   .plrow .dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 9px currentColor}
   .plrow .nm{flex:1;font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -389,11 +456,28 @@ export function renderPanelHtml() {
       <div class="starcard">
         <canvas id="people"></canvas>
         <div class="starlabels" id="peopleLegend"></div>
+        <div class="galsliders">
+          <label><span>转速</span><input type="range" min="0" max="100" value="35" data-gal="speed"><em>0.35</em></label>
+          <label><span>剔透</span><input type="range" min="20" max="100" value="62" data-gal="solid"><em>0.62</em></label>
+          <label><span>大小</span><input type="range" min="60" max="180" value="100" data-gal="size"><em>1.00</em></label>
+          <label><span>距离</span><input type="range" min="55" max="200" value="102" data-gal="dist"><em>1.02</em></label>
+          <button type="button" class="galauto on" data-gal="auto">自动旋转</button>
+        </div>
+        <div id="galaxyDetail"></div>
+        <div class="starlabels" style="opacity:.6">拖拽旋转 · 滚轮缩放 · 点一个人看详情</div>
       </div>
       <div class="starcard">
         <div class="k" style="margin-bottom:10px">记住的人</div>
         <div id="peopleList" class="peoplelist"></div>
       </div>
+    </div>
+  </div>
+
+  <h2>群友日记</h2>
+  <div class="panel">
+    <div class="diarywrap">
+      <div id="diaryList" class="diarylist"><p class="hint">还没有日记内容（聊天插件没接，或者还没到更新时间）。</p></div>
+      <div id="diaryDetail" class="diarydetail"><div class="dscroll"><p class="hint">左边选一个人，看他身上发生过什么。</p></div></div>
     </div>
   </div>
 
@@ -665,51 +749,82 @@ function renderStars(s) {
 }
 
 let gal = null;
-function galaxyLayout(nodes, w, h) {
-  const cx = w / 2, cy = h / 2;
-  const K = Math.min(w, h) * 0.42;
-  const pts = nodes.map((n, i) => ({
-    ...n,
-    x: cx + (Number.isFinite(n.x) ? n.x : Math.cos((i / nodes.length) * Math.PI * 2)) * K * 0.6,
-    y: cy + (Number.isFinite(n.y) ? n.y : Math.sin((i / nodes.length) * Math.PI * 2)) * K * 0.6,
-    vx: 0, vy: 0,
-  }));
-  const ctr = { x: cx, y: cy };
-  let temp = 1;
-  for (let step = 0; step < 260; step += 1) {
-    for (let i = 0; i < pts.length; i += 1) {
-      for (let j = i + 1; j < pts.length; j += 1) {
-        let dx = pts[i].x - pts[j].x;
-        let dy = pts[i].y - pts[j].y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 < 1) { d2 = 1; dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
-        const d = Math.sqrt(d2);
-        const rep = (2200 / d2) * (0.6 + (1 - pts[i].warmth) * 0.8);
-        pts[i].vx += (dx / d) * rep; pts[i].vy += (dy / d) * rep;
-        pts[j].vx -= (dx / d) * rep; pts[j].vy -= (dy / d) * rep;
-      }
-    }
-    for (const p of pts) {
-      const dx = ctr.x - p.x, dy = ctr.y - p.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const target = K * (0.42 + (1 - p.warmth) * 0.55);
-      const pull = (d - target) * 0.012;
-      p.vx += (dx / d) * pull;
-      p.vy += (dy / d) * pull;
-    }
-    for (const p of pts) {
-      const lim = 12 * temp;
-      const v = Math.hypot(p.vx, p.vy) || 1;
-      const scale = Math.min(1, lim / v);
-      p.x += p.vx * scale * 0.55;
-      p.y += p.vy * scale * 0.55;
-      p.vx *= 0.35; p.vy *= 0.35;
-      p.x = Math.max(46, Math.min(w - 46, p.x));
-      p.y = Math.max(28, Math.min(h - 28, p.y));
-    }
-    temp *= 0.985;
-  }
-  return pts;
+
+// ── 3D 星系 ─────────────────────────────────────────────
+//
+// 为什么手写投影而不是上 Three.js：
+//   才几十个点，Three.js 那 600KB 换来的是材质和光照，这里用不上；
+//   而且面板整个是模板字符串，塞一坨库进去维护起来是灾难。
+//   自己算一个透视投影 + 深度排序，够用、可控、不引依赖。
+//
+// 交互：拖拽旋转 / 滚轮缩放 / 悬停高亮 / 点击选中。
+// 视角状态。带几个可调参数（面板上有滑条）：
+//   speed  自动旋转速度
+//   solid  节点实心度 —— 越小越剔透
+//   size   节点大小
+//   dist   镜头远近
+let galView = {
+  rotY: 0.45, rotX: -0.42, dist: 1.02,
+  auto: true, dragging: false, lx: 0, ly: 0,
+  speed: 0.35,   // 0 ~ 1，映射到每帧转角
+  solid: 0.62,   // 0.2 ~ 1，玻璃球的实心程度
+  size: 1,       // 0.6 ~ 1.8
+};
+let galSel = null;      // 选中的节点 id
+let galHover = null;    // 悬停的节点 id
+let galRaf = null;      // 动画帧句柄
+let galNodes = [];      // 当前节点（给交互用）
+
+/**
+ * 把节点铺到球壳上。
+ *
+ * 用 Fibonacci 球是刻意选的：均匀、没有极点堆积，看起来才像星云而不是"一圈一圈"。
+ * 半径按亲近度定 —— 主人最近，不熟的在外环，正好对应"离我多远"。
+ */
+function galaxyLayout3d(nodes) {
+  const n = Math.max(1, nodes.length);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  return nodes.map((node, i) => {
+    // Fibonacci 球面
+    const y = 1 - (i / Math.max(1, n - 1)) * 2;      // 1 → -1
+    const radiusAtY = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = golden * i;
+    // 距离：亲近度越高越靠近中心
+    const shell = 0.42 + (1 - (Number(node.warmth) || 0.5)) * 0.62;
+    return {
+      ...node,
+      // 单位球上的位置 × 壳层半径
+      ux: Math.cos(theta) * radiusAtY,
+      uy: y,
+      uz: Math.sin(theta) * radiusAtY,
+      shell,
+    };
+  });
+}
+
+/**
+ * 投影：绕 X/Y 旋转，然后透视除法。
+ * @param {{ux:number,uy:number,uz:number,shell:number}} p
+ */
+function project3d(p, view, cx, cy, R) {
+  const cosY = Math.cos(view.rotY), sinY = Math.sin(view.rotY);
+  const cosX = Math.cos(view.rotX), sinX = Math.sin(view.rotX);
+  const sx = p.ux * p.shell, sy = p.uy * p.shell, sz = p.uz * p.shell;
+  // 绕 Y 轴
+  const x1 = sx * cosY - sz * sinY;
+  const z1 = sx * sinY + sz * cosY;
+  // 绕 X 轴
+  const y1 = sy * cosX - z1 * sinX;
+  const z2 = sy * sinX + z1 * cosX;
+  // 透视：z 越大（离观察者越近）越放大
+  const persp = 1.9 / (1.9 + z2 * 1.15);
+  const scale = R * view.dist * persp;
+  return {
+    x: cx + x1 * scale,
+    y: cy + y1 * scale,
+    z: z2,                     // 深度，用来排序和调透明度
+    r: persp,                  // 相对大小
+  };
 }
 
 function drawGalaxy(nodes, w, h) {
@@ -720,22 +835,19 @@ function drawGalaxy(nodes, w, h) {
   const g = cv.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, w, h);
+
   const cx = w / 2, cy = h / 2;
+  const R = Math.min(w, h) * 0.44;
 
   const groupIdx = {};
   let gi = 0;
   for (const p of nodes) if (!(p.group in groupIdx)) groupIdx[p.group] = gi++;
 
-  g.strokeStyle = 'rgba(56,189,248,0.06)';
+  // 背景：网格 + 几个同心圈（当作"轨道的投影"）
+  g.strokeStyle = 'rgba(56,189,248,0.05)';
   g.lineWidth = 1;
   for (let x = 0; x < w; x += 34) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
   for (let y = 0; y < h; y += 34) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
-  for (const r of [0.3, 0.55, 0.8]) {
-    g.beginPath();
-    g.arc(cx, cy, Math.min(w, h) * r * 0.52, 0, Math.PI * 2);
-    g.strokeStyle = 'rgba(56,189,248,0.07)';
-    g.stroke();
-  }
 
   if (!nodes.length) {
     g.fillStyle = 'rgba(148,163,184,.55)';
@@ -746,80 +858,448 @@ function drawGalaxy(nodes, w, h) {
     return;
   }
 
-  const pts = gal ? gal.pts : galaxyLayout(nodes, w, h);
-  pts.forEach((p) => {
-    const dx = p.x - cx, dy = p.y - cy;
-    const d = Math.hypot(dx, dy) || 1;
-    const ux = dx / d, uy = dy / d;
-    const startX = cx + ux * 22, startY = cy + uy * 22;
-    const endX = p.x - ux * 14, endY = p.y - uy * 14;
-    const col = p.relation === 'owner' ? REL_COLORS.owner : (GROUP_COLORS[groupIdx[p.group] ?? 0] || REL_COLORS[p.relation] || '#64748b');
+  if (!gal || gal.key !== nodes.length) {
+    gal = { key: nodes.length, pts: galaxyLayout3d(nodes) };
+  }
+  galNodes = gal.pts;
+
+  // 投影 + 按深度排序（远的先画）
+  const proj = gal.pts.map((p) => ({ p, q: project3d(p, galView, cx, cy, R) }));
+  proj.sort((a, b) => b.q.z - a.q.z);
+
+  // 挑出最靠前的十几个给它们画名字（+ 主人永远标）。
+  // 全标会糊成一团，全不标又不知道谁是谁，取个中间。
+  const labelIds = new Set();
+  const byDepth = [...proj].sort((a, b) => a.q.z - b.q.z); // z 越小越靠前
+  for (const { p } of byDepth.slice(0, 14)) labelIds.add(p.id);
+  for (const { p } of proj) if (p.relation === 'owner') labelIds.add(p.id);
+
+  const hot = (p) => p.id === galSel || p.id === galHover;
+
+  // 连线：从核心到每个节点
+  for (const { p, q } of proj) {
+    const isHot = hot(p);
+    const col = p.relation === 'owner'
+      ? REL_COLORS.owner
+      : (GROUP_COLORS[groupIdx[p.group] ?? 0] || REL_COLORS[p.relation] || '#64748b');
+    // 淡出远处的线，制造景深
+    const depth = (q.z + 1.2) / 2.4;             // 0(远) ~ 1(近)
+    const alpha = (0.06 + depth * 0.34) * (isHot ? 2.6 : 1);
     g.beginPath();
-    g.moveTo(startX, startY);
-    g.lineTo(endX, endY);
+    g.moveTo(cx, cy);
+    g.lineTo(q.x, q.y);
     g.strokeStyle = col;
-    g.globalAlpha = 0.22 + p.warmth * 0.55;
-    g.lineWidth = 0.8 + p.warmth * 2.2;
+    g.globalAlpha = Math.min(0.85, alpha * (0.4 + p.warmth * 0.6));
+    g.lineWidth = isHot ? 2.4 : 0.6 + depth * 1.3;
     g.stroke();
     g.globalAlpha = 1;
-    const ang = Math.atan2(uy, ux);
-    const ah = 6 + p.warmth * 3;
-    g.beginPath();
-    g.moveTo(endX, endY);
-    g.lineTo(endX - ah * Math.cos(ang - 0.4), endY - ah * Math.sin(ang - 0.4));
-    g.lineTo(endX - ah * Math.cos(ang + 0.4), endY - ah * Math.sin(ang + 0.4));
-    g.closePath();
-    g.fillStyle = col;
-    g.globalAlpha = 0.35 + p.warmth * 0.5;
-    g.fill();
-    g.globalAlpha = 1;
-  });
-  pts.forEach((p) => {
-    const col = p.relation === 'owner' ? REL_COLORS.owner : (GROUP_COLORS[groupIdx[p.group] ?? 0] || REL_COLORS[p.relation] || '#64748b');
-    const r = 5 + p.warmth * 6;
-    const halo = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 2.6);
-    halo.addColorStop(0, col + '55');
+  }
+
+  // 节点
+  for (const { p, q } of proj) {
+    const col = p.relation === 'owner'
+      ? REL_COLORS.owner
+      : (GROUP_COLORS[groupIdx[p.group] ?? 0] || REL_COLORS[p.relation] || '#64748b');
+    const depth = (q.z + 1.2) / 2.4;             // 0 ~ 1
+    const isHot = hot(p);
+    // 节点要够大才看得出多面体：原来直径 7~14，棱角全糊成圆点。
+    const r = (5.5 + p.warmth * 5.5) * q.r * (galView.size ?? 1);
+    // 远的更暗
+    const dim = 0.30 + depth * 0.55;
+    // 剔透度：越靠前越"实"，远的更透明 —— 像玻璃球一样看得出层叠
+    const solid = (galView.solid ?? 0.55) * (0.55 + depth * 0.45);
+
+    // 光晕（外面那圈雾）
+    const halo = g.createRadialGradient(q.x, q.y, r * 0.5, q.x, q.y, r * 3.4);
+    halo.addColorStop(0, col + (isHot ? '66' : '33'));
+    halo.addColorStop(0.55, col + '14');
     halo.addColorStop(1, col + '00');
     g.beginPath();
-    g.arc(p.x, p.y, r * 2.6, 0, Math.PI * 2);
+    g.arc(q.x, q.y, r * 3.4, 0, Math.PI * 2);
     g.fillStyle = halo;
+    g.globalAlpha = dim * 0.9;
     g.fill();
+    g.globalAlpha = 1;
+
+    // 本体：球体。
+    //
+    // 试过低多边形那一版，问题是面太少、每个面颜色跳变太大，
+    // 一堆紫块看着像低像素图标，反而脏。球体虽然"平"，但干净。
+    //
+    // 立体感靠三层叠出来，不是靠贴一个白点：
+    //   ① 主体：光从左上来的径向渐变（亮→本色→暗）
+    //   ② 内缘光：右上角一圈反光，模拟球面掠射
+    //   ③ 外缘暗边：底部压暗一点，球才"圆"得出来
+    drawSphere(g, q.x, q.y, r, col, solid, isHot);
+
+    // 边缘细描：内侧一点亮边（大气层的感觉）
     g.beginPath();
-    g.arc(p.x, p.y, r, 0, Math.PI * 2);
-    g.fillStyle = col;
-    g.fill();
-    g.strokeStyle = 'rgba(255,255,255,.35)';
-    g.lineWidth = 1;
+    g.arc(q.x, q.y, r, 0, Math.PI * 2);
+    g.strokeStyle = isHot ? 'rgba(255,255,255,.85)' : lighten(col, 0.4) + '77';
+    g.lineWidth = isHot ? 1.4 : 0.7;
+    g.globalAlpha = Math.min(1, solid + 0.15);
     g.stroke();
-    const label = p.name.length > 9 ? p.name.slice(0, 9) + '…' : p.name;
-    g.font = '600 11.5px ui-sans-serif,system-ui,sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'top';
-    g.lineWidth = 3;
-    g.strokeStyle = 'rgba(10,14,20,.9)';
-    g.strokeText(label, p.x, p.y + r + 5);
-    g.fillStyle = '#e8f0fa';
-    g.fillText(label, p.x, p.y + r + 5);
-  });
+    g.globalAlpha = 1;
+
+    // 名字：只给最靠前的十几个 + 选中的画。
+    // 八十个名字全画出来就是一团糊 —— 只有正面朝观察者的那些值得标，
+    // 远处的能不能看清无所谓，转一转就转过来了。
+    if (isHot || labelIds.has(p.id)) {
+      const label = p.name.length > 9 ? p.name.slice(0, 9) + '…' : p.name;
+      g.font = '600 ' + (isHot ? 12 : 10.5) + 'px ui-sans-serif,system-ui,sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'top';
+      g.globalAlpha = isHot ? 1 : 0.55 + depth * 0.45;
+      g.lineWidth = 3;
+      g.strokeStyle = 'rgba(10,14,20,.92)';
+      g.strokeText(label, q.x, q.y + r + 4);
+      g.fillStyle = isHot ? '#fff' : '#cfe3f5';
+      g.fillText(label, q.x, q.y + r + 4);
+      g.globalAlpha = 1;
+    }
+  }
+
+  // 星环：套在核心外面的一圈椭圆，跟着视角一起转。
+  //
+  // 用椭圆而不是正圆，是为了让它"躺"在一个倾斜的轨道面上 ——
+  // 正圆看着像画了个靶子，椭圆才有行星环的意思。
+  drawRing(g, cx, cy, R, galView);
+
   drawCore(g, cx, cy);
 }
 
+/** 颜色工具：把 #rrggbb 变亮一些（t: 0~1） */
+function lighten(hex, t) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return hex;
+  const n = parseInt(h, 16);
+  const r = (n >> 16) & 255, gg = (n >> 8) & 255, b = n & 255;
+  const mix = (v) => Math.round(v + (255 - v) * t);
+  return '#' + [mix(r), mix(gg), mix(b)].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+/** 颜色工具：把 #rrggbb 变暗一些（t: 0~1） */
+function darken(hex, t) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return hex;
+  const n = parseInt(h, 16);
+  const r = (n >> 16) & 255, gg = (n >> 8) & 255, b = n & 255;
+  const mix = (v) => Math.round(v * (1 - t));
+  return '#' + [mix(r), mix(gg), mix(b)].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * 星环：核心外面两圈倾斜的椭圆环。
+ *
+ * 环会跟着 rotY 转、跟着 rotX 压扁 —— 转视角的时候看得出来它是"围着核心转的"，
+ * 不是画上去的。两条环半径不同、亮度不同，叠起来有点层次。
+ *
+ * @param {CanvasRenderingContext2D} g
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} R 星系半径
+ * @param {{rotY:number, rotX:number, dist:number}} view
+ */
+function drawRing(g, cx, cy, R, view) {
+  const rings = [
+    { radius: 0.26, tilt: 0.30, alpha: 0.55, width: 2.4 },
+    { radius: 0.36, tilt: 0.38, alpha: 0.32, width: 1.5 },
+    { radius: 0.47, tilt: 0.45, alpha: 0.14, width: 1.0 },
+  ];
+  for (const ring of rings) {
+    const rr = R * ring.radius * (view.dist ?? 1);
+    // 椭圆短轴随 rotX 变化：转得越"侧"越扁
+    const squash = Math.abs(Math.cos(view.rotX)) * (1 - ring.tilt) + 0.08;
+    // 环在屏幕上的旋转角由 rotY 决定（视觉上像在绕核心转）
+    const spin = view.rotY * 0.55;
+
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(spin);
+    g.scale(1, Math.max(0.05, squash));
+
+    // 主体
+    g.beginPath();
+    g.arc(0, 0, rr, 0, Math.PI * 2);
+    g.strokeStyle = 'rgba(56,189,248,' + ring.alpha + ')';
+    g.lineWidth = ring.width;
+    g.stroke();
+
+    // 一点高光：环的左侧更亮，像被光照到
+    const glow = g.createLinearGradient(-rr, 0, rr, 0);
+    glow.addColorStop(0, 'rgba(147,197,253,0)');
+    glow.addColorStop(0.25, 'rgba(147,197,253,' + ring.alpha * 1.6 + ')');
+    glow.addColorStop(0.5, 'rgba(56,189,248,0)');
+    g.beginPath();
+    g.arc(0, 0, rr, 0, Math.PI * 2);
+    g.strokeStyle = glow;
+    g.lineWidth = ring.width + 0.8;
+    g.stroke();
+
+    g.restore();
+  }
+}
+
+/**
+ * 画一个球。
+ *
+ * 之前试过低多边形，面太少、每个面颜色跳变太大，一堆紫块看着像低像素图标。
+ * 球体虽然"平"，但干净 —— 立体感靠下面三层叠，不是靠贴一个白点：
+ *
+ *   ① 主体：光从左上来，亮 → 本色 → 暗的径向渐变
+ *   ② 内缘反光：右上角一圈很淡的环光，模拟球面的掠射
+ *   ③ 底部压暗：外缘一圈暗，球才鼓得出来
+ *
+ * @param {CanvasRenderingContext2D} g
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @param {string} col 基色 #rrggbb
+ * @param {number} alpha 整体透明度
+ * @param {boolean} hot 是不是选中/悬停
+ */
+function drawSphere(g, cx, cy, r, col, alpha, hot) {
+  g.globalAlpha = alpha;
+
+  // ① 主体渐变：光源在左上 45°
+  const lx = cx - r * 0.42;
+  const ly = cy - r * 0.48;
+  const body = g.createRadialGradient(lx, ly, r * 0.05, cx, cy, r * 1.28);
+  body.addColorStop(0, lighten(col, 0.42));
+  body.addColorStop(0.30, lighten(col, 0.12));
+  body.addColorStop(0.62, col);
+  body.addColorStop(0.88, darken(col, 0.34));
+  body.addColorStop(1, darken(col, 0.62));
+  g.beginPath();
+  g.arc(cx, cy, r, 0, Math.PI * 2);
+  g.fillStyle = body;
+  g.fill();
+
+  // ② 内缘反光：右上角一小片，越靠边越亮
+  if (r > 2.5) {
+    const shine = g.createRadialGradient(
+      cx + r * 0.42, cy + r * 0.40, r * 0.15,
+      cx + r * 0.42, cy + r * 0.40, r * 0.95,
+    );
+    shine.addColorStop(0, 'rgba(255,255,255,.22)');
+    shine.addColorStop(1, 'rgba(255,255,255,0)');
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.save();
+    g.clip();
+    g.fillStyle = shine;
+    g.fillRect(cx - r, cy - r, r * 2, r * 2);
+    g.restore();
+  }
+
+  // ③ 底部压暗 —— 让球"落"下去一点，显得是立体的球不是圆片
+  if (r > 2.5) {
+    const shade = g.createLinearGradient(0, cy, 0, cy + r);
+    shade.addColorStop(0, 'rgba(0,0,0,0)');
+    shade.addColorStop(1, 'rgba(0,0,0,.28)');
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.save();
+    g.clip();
+    g.fillStyle = shade;
+    g.fillRect(cx - r, cy - r, r * 2, r * 2);
+    g.restore();
+  }
+
+  // 选中时加一点内部泛光
+  if (hot) {
+    const glow = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+    glow.addColorStop(0, 'rgba(255,255,255,.35)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.fillStyle = glow;
+    g.fill();
+  }
+
+  g.globalAlpha = 1;
+}
+
+/** 星系请求动画帧（自动旋转 / 拖拽惯性时用） */
+function galaxyTick() {
+  const cv = document.getElementById('people');
+  if (!cv) { galRaf = null; return; }
+  if (galView.auto && !galView.dragging) galView.rotY += 0.0035 * (galView.speed ?? 0.35) * 2.8;
+  const w = cv.clientWidth || 520;
+  drawGalaxy(galNodes, w, cv.clientHeight || 460);
+  if (galView.auto || galView.dragging) galRaf = requestAnimationFrame(galaxyTick);
+  else galRaf = null;
+}
+
+/** 把交互绑到 canvas 上（只绑一次） */
+function bindGalaxyInteraction() {
+  const cv = document.getElementById('people');
+  if (!cv || cv.dataset.bound === '1') return;
+  cv.dataset.bound = '1';
+  cv.style.cursor = 'grab';
+
+  const hit = (ev) => {
+    const rect = cv.getBoundingClientRect();
+    const mx = ev.clientX - rect.left;
+    const my = ev.clientY - rect.top;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    // 找最近的、在半径内的节点
+    let best = null, bestD = 18;
+    for (const p of galNodes) {
+      const q = project3d(p, galView, w / 2, h / 2, Math.min(w, h) * 0.40);
+      const d = Math.hypot(q.x - mx, q.y - my);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  };
+
+  cv.addEventListener('pointerdown', (ev) => {
+    galView.dragging = true;
+    galView.lx = ev.clientX; galView.ly = ev.clientY;
+    cv.style.cursor = 'grabbing';
+    cv.setPointerCapture?.(ev.pointerId);
+    if (!galRaf) galaxyTick();
+  });
+
+  cv.addEventListener('pointermove', (ev) => {
+    if (galView.dragging) {
+      const dx = ev.clientX - galView.lx;
+      const dy = ev.clientY - galView.ly;
+      galView.lx = ev.clientX; galView.ly = ev.clientY;
+      galView.rotY += dx * 0.008;
+      galView.rotX = Math.max(-1.35, Math.min(1.35, galView.rotX + dy * 0.006));
+      return;
+    }
+    // 悬停高亮
+    const p = hit(ev);
+    const id = p ? p.id : null;
+    if (id !== galHover) {
+      galHover = id;
+      cv.style.cursor = id ? 'pointer' : 'grab';
+      const w = cv.clientWidth || 520;
+      drawGalaxy(galNodes, w, cv.clientHeight || 460);
+    }
+  });
+
+  const endDrag = () => {
+    galView.dragging = false;
+    cv.style.cursor = 'grab';
+  };
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
+  cv.addEventListener('pointerleave', () => { galHover = null; endDrag(); });
+
+  cv.addEventListener('click', (ev) => {
+    const p = hit(ev);
+    galSel = p ? p.id : null;
+    renderGalaxyDetail(p || null);
+    // 右侧列表跟着高亮（跟列表点回星图是同一个状态）
+    const list = document.getElementById('peopleList');
+    if (list) {
+      for (const row of list.querySelectorAll('.plrow')) {
+        row.classList.toggle('on', row.dataset.pid === galSel);
+      }
+      const on = list.querySelector('.plrow.on');
+      on?.scrollIntoView({ block: 'nearest' });
+    }
+    const w = cv.clientWidth || 520;
+    drawGalaxy(galNodes, w, cv.clientHeight || 460);
+  });
+
+  cv.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const next = galView.dist * (ev.deltaY > 0 ? 0.92 : 1.08);
+    galView.dist = Math.max(0.55, Math.min(2.2, next));
+    syncGalSliders();
+    const w = cv.clientWidth || 520;
+    drawGalaxy(galNodes, w, cv.clientHeight || 460);
+  }, { passive: false });
+}
+
+/** 把 galView 的当前值写回滑条（滚轮改了距离时也要跟着动） */
+function syncGalSliders() {
+  const wrap = document.querySelector('.galsliders');
+  if (!wrap) return;
+  const fmt = (v) => (Math.round(v * 100) / 100).toFixed(2);
+  for (const el of wrap.querySelectorAll('input[data-gal]')) {
+    const key = el.dataset.gal;
+    const v = galView[key];
+    if (typeof v !== 'number') continue;
+    el.value = String(Math.round(v * 100));
+    const em = el.parentElement?.querySelector('em');
+    if (em) em.textContent = fmt(v);
+  }
+}
+
+/** 绑滑条（只绑一次） */
+function bindGalSliders() {
+  const wrap = document.querySelector('.galsliders');
+  if (!wrap || wrap.dataset.bound === '1') return;
+  wrap.dataset.bound = '1';
+
+  const redraw = () => {
+    const cv = document.getElementById('people');
+    if (!cv) return;
+    drawGalaxy(galNodes, cv.clientWidth || 520, cv.clientHeight || 460);
+  };
+
+  for (const el of wrap.querySelectorAll('input[data-gal]')) {
+    el.addEventListener('input', () => {
+      const key = el.dataset.gal;
+      galView[key] = Number(el.value) / 100;
+      const em = el.parentElement?.querySelector('em');
+      if (em) em.textContent = (Number(el.value) / 100).toFixed(2);
+      redraw();
+      // 调转速的时候保证动画在跑
+      if (key === 'speed' && galView.auto && !galRaf) galaxyTick();
+    });
+  }
+
+  const autoBtn = wrap.querySelector('.galauto');
+  if (autoBtn) {
+    autoBtn.addEventListener('click', () => {
+      galView.auto = !galView.auto;
+      autoBtn.classList.toggle('on', galView.auto);
+      if (galView.auto && !galRaf) galaxyTick();
+    });
+  }
+}
+
+/** 选中一个人后，在星系下方显示详情 */
+function renderGalaxyDetail(p) {
+  const box = document.getElementById('galaxyDetail');
+  if (!box) return;
+  if (!p) { box.innerHTML = ''; return; }
+  const rel = REL_NAMES[p.relation] || p.relation;
+  const relCol = REL_COLORS[p.relation] || '#64748b';
+  const gs = p.groups || (p.group ? [p.group] : []);
+  box.innerHTML =
+    '<div class="gdet">' +
+      '<span class="gnm">' + esc(p.name) + '</span>' +
+      '<span class="gid">QQ ' + esc(p.id) + '</span>' +
+      '<span class="grel" style="color:' + relCol + ';border-color:' + relCol + '55">' + esc(rel) + '</span>' +
+      (gs.length ? '<span class="ggrp">' + gs.map((x) => '群 ' + esc(x)).join(' · ') + '</span>' : '') +
+      '<span class="gnote">' + esc(p.note || '（还没有印象）') + '</span>' +
+    '</div>';
+}
+
 function drawCore(g, cx, cy) {
-  const hal = g.createRadialGradient(cx, cy, 0, cx, cy, 46);
-  hal.addColorStop(0, 'rgba(56,189,248,.5)');
+  const hal = g.createRadialGradient(cx, cy, 0, cx, cy, 54);
+  hal.addColorStop(0, 'rgba(56,189,248,.45)');
   hal.addColorStop(1, 'rgba(56,189,248,0)');
   g.beginPath();
-  g.arc(cx, cy, 46, 0, Math.PI * 2);
+  g.arc(cx, cy, 54, 0, Math.PI * 2);
   g.fillStyle = hal;
   g.fill();
-  const core = g.createRadialGradient(cx - 5, cy - 5, 2, cx, cy, 20);
-  core.addColorStop(0, '#93c5fd');
-  core.addColorStop(1, '#2563eb');
+  const core = g.createRadialGradient(cx - 5, cy - 6, 2, cx, cy, 19);
+  core.addColorStop(0, '#dbeafe');
+  core.addColorStop(0.5, '#60a5fa');
+  core.addColorStop(1, '#1d4ed8');
   g.beginPath();
   g.arc(cx, cy, 17, 0, Math.PI * 2);
   g.fillStyle = core;
   g.fill();
-  g.strokeStyle = 'rgba(147,197,253,.55)';
+  g.strokeStyle = 'rgba(191,219,254,.6)';
   g.lineWidth = 2;
   g.stroke();
   g.fillStyle = '#fff';
@@ -837,10 +1317,16 @@ function renderPeople(s) {
   if (cv) {
     const w = cv.clientWidth || 520;
     const h = 460;
-    if (!gal || gal.key !== String(nodes.length)) {
-      gal = { key: String(nodes.length), pts: galaxyLayout(nodes, w, h) };
+    // 节点集合变了才重新布点；否则保留当前视角，免得每 2 秒重置到初始角度
+    if (!gal || gal.key !== nodes.length) {
+      gal = { key: nodes.length, pts: galaxyLayout3d(nodes) };
     }
+    galNodes = gal.pts;
+    bindGalaxyInteraction();
+    bindGalSliders();
     drawGalaxy(nodes, w, h);
+    // 启动自动旋转（只启一次）
+    if (!galRaf && galView.auto) galaxyTick();
   }
   const legend = document.getElementById('peopleLegend');
   if (legend) {
@@ -859,19 +1345,84 @@ function renderPeople(s) {
   }
   const list = document.getElementById('peopleList');
   if (list) {
-    list.innerHTML = nodes.length
-      ? nodes.map((p) => {
-          const gs = p.groups || (p.group ? [p.group] : []);
-          const gTag = gs.length > 1 ? '<span class="gtag" title="' + esc(gs.join('、')) + '">' + gs.length + ' 群</span>' : '';
-          return '<div class="plrow">' +
-            '<span class="dot" style="background:' + (REL_COLORS[p.relation] || '#64748b') + '"></span>' +
-            '<span class="nm" title="' + esc(p.note) + '">' + esc(p.name) + '</span>' + gTag +
-            '<span class="bar2"><i style="width:' + Math.round(p.warmth * 100) + '%"></i></span>' +
-            '<span class="rel ' + p.relation + '">' + (REL_NAMES[p.relation] || p.relation) + '</span>' +
-            '</div>';
-        }).join('')
-      : '<div class="empty">还没有人名记忆</div>';
+    // 主人永远置顶：管他 warmth 算出来多少，主人就该在第一行。
+    // 其余按亲近度排（后端已经排过了，这里只把 owner 提上来）。
+    const ordered = nodes;
+    // 只在名单变化时重建：这行每 2 秒刷一次，无条件重写会把悬停/滚动状态冲掉
+    const sig = ordered.map((p) => p.id).join(',');
+    if (list.dataset.sig !== sig) {
+      list.dataset.sig = sig;
+      list.innerHTML = ordered.length
+        ? ordered.map((p) => {
+            const gs = p.groups || (p.group ? [p.group] : []);
+            const gTag = gs.length > 1 ? '<span class="gtag" title="' + esc(gs.join('、')) + '">' + gs.length + ' 群</span>' : '';
+            const on = p.id === galSel ? ' on' : '';
+            const pin = false; // 发布版没有置顶
+            const pinMark = pin ? '<span class="pinmark" title="置顶">★</span>' : '';
+            return '<div class="plrow' + on + (pin ? ' pinned' : '') + '" data-pid="' + esc(p.id) + '">' +
+              '<span class="dot" style="background:' + (REL_COLORS[p.relation] || '#64748b') + '"></span>' +
+              pinMark +
+              '<span class="nm" title="' + esc(p.note) + '">' + esc(p.name) + '</span>' + gTag +
+              '<span class="bar2"><i style="width:' + Math.round(p.warmth * 100) + '%"></i></span>' +
+              '<span class="rel ' + p.relation + '">' + (REL_NAMES[p.relation] || p.relation) + '</span>' +
+              '</div>';
+          }).join('')
+        : '<div class="empty">还没有人名记忆</div>';
+      bindPeopleList();
+    }
+    // 高亮跟随星图选择
+    for (const row of list.querySelectorAll('.plrow')) {
+      row.classList.toggle('on', row.dataset.pid === galSel);
+    }
   }
+}
+
+/**
+ * 右侧「记住的人」列表的交互。
+ *
+ * 跟星图双向联动：
+ *   点一行 → 星图选中这个节点 + 下方显示详情
+ *   悬停一行 → 星图上对应节点高亮
+ *
+ * 只绑一次；列表重建后由调用方重新 bind。
+ */
+function bindPeopleList() {
+  const list = document.getElementById('peopleList');
+  if (!list) return;
+
+  const findNode = (id) => galNodes.find((n) => String(n.id) === String(id)) || null;
+
+  const redraw = () => {
+    const cv = document.getElementById('people');
+    if (!cv) return;
+    drawGalaxy(galNodes, cv.clientWidth || 520, cv.clientHeight || 460);
+  };
+
+  list.onclick = (ev) => {
+    const row = ev.target.closest('.plrow');
+    if (!row) return;
+    const p = findNode(row.dataset.pid);
+    // 点同一个再点一次 = 取消选中
+    galSel = galSel === row.dataset.pid ? null : row.dataset.pid;
+    for (const r of list.querySelectorAll('.plrow')) {
+      r.classList.toggle('on', r.dataset.pid === galSel);
+    }
+    renderGalaxyDetail(galSel ? p : null);
+    redraw();
+  };
+
+  list.onmouseover = (ev) => {
+    const row = ev.target.closest('.plrow');
+    if (!row) return;
+    if (galHover !== row.dataset.pid) {
+      galHover = row.dataset.pid;
+      redraw();
+    }
+  };
+
+  list.onmouseleave = () => {
+    if (galHover) { galHover = null; redraw(); }
+  };
 }
 
 // ── 外部贡献区块（qq-kit 等插件提供）────────────────────
@@ -909,6 +1460,93 @@ function renderStale(s) {
   }
   bar.hidden = false;
   files.textContent = list.map((x) => x.file).join(' · ');
+}
+
+/**
+ * 群友日记。
+ *
+ * 数据来自 qq-kit 的贡献（contributions["qq-kit"].diary）——
+ * 日记归聊天插件管，这层只负责显示。没有贡献时给个提示，不装作有数据。
+ */
+let diarySelected = null;
+
+
+function renderDiary(s) {
+  const list = document.getElementById('diaryList');
+  const detail = document.getElementById('diaryDetail');
+  if (!list || !detail) return;
+
+  const d = s?.contributions?.['qq-kit']?.diary;
+  const groups = (d && d.groups) || [];
+  // 取第一个有内容的群
+  const group = groups.find((g) => (g.people || []).length > 0);
+  if (!group) {
+    list.innerHTML = '<p class="hint">还没有日记内容（还没到更新时间，或者聊天插件没接）。</p>';
+    detail.innerHTML = '<div class="dscroll"><p class="hint">左边选一个人，看他身上发生过什么。</p></div>';
+    return;
+  }
+
+  // 保持已选的人；没有就选第一个
+  const people = group.people;
+  if (!diarySelected || !people.some((p) => p.userId === diarySelected)) {
+    diarySelected = people[0].userId;
+  }
+
+  // 左边名单（只在结构变了才重建，避免每 2 秒冲掉鼠标状态）
+  const sig = group.id + ':' + people.map((p) => p.userId).join(',');
+  if (list.dataset.sig !== sig) {
+    list.dataset.sig = sig;
+    list.innerHTML = people
+      .map((p) => {
+        const pin = false; // 发布版日记列表不置顶
+        return (
+          '<div class="dperson' + (pin ? ' pinned' : '') + '" data-uid="' + esc(p.userId) + '" data-gid="' + esc(group.id) + '">' +
+          (pin ? '<span class="pinmark">★</span>' : '') +
+          '<span class="nm">' + esc(p.name) + '</span>' +
+          '<span class="id">' + esc(p.userId) + '</span>' +
+          '<span class="ct">' + (p.count > 0 ? p.count + ' 条' : '还没记') + '</span>' +
+          '</div>'
+        );
+      })
+      .join('');
+    list.onclick = (ev) => {
+      const el = ev.target.closest('.dperson');
+      if (!el) return;
+      diarySelected = el.dataset.uid;
+      renderDiary(s);
+    };
+  } else {
+    for (const el of list.querySelectorAll('.dperson')) {
+      el.classList.toggle('on', el.dataset.uid === diarySelected);
+    }
+  }
+
+  // 右边时间线
+  const person = people.find((p) => p.userId === diarySelected);
+  const raw = (group.diaries && group.diaries[diarySelected]) || '';
+  // 注意：这一段在**模板字符串**里，所有反斜杠都要写双份。
+  //   \\r \\n \\s  →  渲染后才是 \r \n \s
+  // 之前 \\r?\\n 转对了，但下面的 \\s 忘了转 —— 变成字母 s，
+  // 正则 /^s*[-*]s+/ 谁都匹配不上，于是左边显示"3 条"、右边却说"还没有事件"。
+  const events = raw
+    .split(/\\r?\\n/)
+    .map((line) => line.match(/^\\s*[-*]\\s+(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})\\s+(.+)$/))
+    .filter(Boolean)
+    .map((m) => ({ key: m[1] + m[2] + m[3] + m[4], md: m[1] + '-' + m[2], t: m[3] + ':' + m[4], text: m[5] }))
+    .sort((a, b) => b.key.localeCompare(a.key));
+
+  let body = '<p class="hint">这个人还没有记下什么关键事件。</p>';
+  if (events.length) {
+    body = '<ul class="dtl">' + events.map((e) => {
+      return '<li><time><b>' + esc(e.t) + '</b><span>' + esc(e.md) + '</span></time><p>' + esc(e.text) + '</p></li>';
+    }).join('') + '</ul>';
+  }
+  detail.innerHTML =
+    '<div class="dscroll">' +
+    '<h3>' + esc(person ? person.name : diarySelected) + '</h3>' +
+    '<div class="qq">QQ ' + esc(diarySelected) + '</div>' +
+    body +
+    '</div>';
 }
 
 function renderExtras(s) {
@@ -956,7 +1594,8 @@ function renderExtras(s) {
       parts.push('</div>');
       // 参数调节：只有供给方声明了 apply（支持在线调参）才显示
       if (data._canApply) {
-        const cid = 'tune-' + id.replace(/[^\w-]/g, '_');
+        // 模板字符串里 \\w 才不会被吃掉（单写会变成字母 w）
+        const cid = 'tune-' + id.replace(/[^\\w-]/g, '_');
         parts.push('<div class="tunebox" id="' + cid + '">');
         parts.push('<div class="tunegrid">');
         // 主动插话频率
@@ -1166,6 +1805,8 @@ async function tick() {
       throw new Error('HTTP ' + r.status + (body ? '：' + body.slice(0, 120) : ''));
     }
     s = await r.json();
+    // 存一份最近的状态：切群标签时要重画，但不必重新请求
+    window.__lastState = s;
   } catch (e) {
     document.getElementById('cards').innerHTML =
       '<div class="card" style="border:1px solid #1e2b3d;padding:12px 16px"><div class="k">取数据失败</div><div style="color:#f87171">' + esc(e.message) + '</div></div>';
@@ -1174,11 +1815,15 @@ async function tick() {
   renderMood(s);
   renderStars(s);
   renderPeople(s);
+  renderDiary(s);
   renderExtras(s);
   renderStale(s);
   const pts = (s.moodHistory && s.moodHistory.points) || [];
+  // 「情绪点」显示真·历史累计（含被 2000 上限裁掉的），不是当前存着几条。
+  // 顺便把"当前留存"作为小字标出来，免得看到 2000 以为卡住了。
+  const totalPts = Number(s.moodHistory && s.moodHistory.total) || pts.length;
   document.getElementById('cards').innerHTML = [
-    ['情绪点', pts.length, '历史累计'],
+    ['情绪点', totalPts, pts.length < totalPts ? '历史累计 · 现存 ' + pts.length : '历史累计'],
     ['记住的人', (s.people && s.people.nodes && s.people.nodes.length) || 0, '记忆星系'],
     ['版本', 'v' + esc(s.version || ''), ''],
   ].map(([k, v, sub]) =>
